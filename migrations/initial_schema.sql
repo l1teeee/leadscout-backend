@@ -10,6 +10,10 @@ create table if not exists workspaces (
   country    text        not null default 'El Salvador',
   timezone   text        not null default 'America/El_Salvador',
   currency   text        not null default 'USD',
+  industry   text,
+  city       text,
+  phone      text,
+  website    text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -110,6 +114,27 @@ alter table workspaces     enable row level security;
 alter table profiles       enable row level security;
 alter table leads          enable row level security;
 alter table lead_activities enable row level security;
+
+-- Workspaces: users see and edit only their own workspace
+create policy "workspaces_select"
+  on workspaces for select
+  using (id in (select workspace_id from profiles where id = auth.uid()));
+
+create policy "workspaces_update"
+  on workspaces for update
+  using (id in (
+    select workspace_id from profiles
+    where id = auth.uid() and role in ('owner', 'admin')
+  ));
+
+-- Profiles: users see teammates and update only their own row
+create policy "profiles_select"
+  on profiles for select
+  using (workspace_id in (select workspace_id from profiles where id = auth.uid()));
+
+create policy "profiles_update"
+  on profiles for update
+  using (id = auth.uid());
 
 -- Users only see data from their own workspace
 create policy "leads_workspace_select"

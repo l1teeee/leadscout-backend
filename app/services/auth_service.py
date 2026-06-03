@@ -139,13 +139,18 @@ async def complete_onboarding(token: str, data: dict) -> AuthUser:
     slug = f"{_slugify(workspace_name)}-{user_id[:4]}"
 
     # Create workspace row
+    workspace_payload: dict = {
+        "name": workspace_name,
+        "slug": slug,
+        "country": data.get("country", "El Salvador"),
+    }
+    for field in ("industry", "city", "phone", "website"):
+        if data.get(field):
+            workspace_payload[field] = data[field]
+
     ws_result = (
         client.table("workspaces")
-        .insert({
-            "name": workspace_name,
-            "slug": slug,
-            "country": data.get("country", "El Salvador"),
-        })
+        .insert(workspace_payload)
         .execute()
     )
     workspace_id: str = ws_result.data[0]["id"]

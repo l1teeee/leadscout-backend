@@ -117,30 +117,63 @@ async def forgot_password(email: str, redirect_url: str) -> None:
     client.auth.reset_password_for_email(email, {"redirect_to": redirect_url})
 
 
+def _slugify(text: str) -> str:
+    import re
+    slug = text.lower().strip()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = re.sub(r"[\s_-]+", "-", slug)
+    return slug[:60] or "workspace"
+
+
 async def complete_onboarding(token: str, data: dict) -> AuthUser:
     client = _db()
     if not client:
         logger.info("Mock auth: complete onboarding")
         return AuthUser(id="mock-user-id", email="demo@example.com", full_name=data.get("full_name"), onboarded=True)
 
-    # Merge incoming data into existing metadata (preserve fields not sent)
     user_response = client.auth.get_user(token)
-    existing_meta = user_response.user.user_metadata or {}
-    updated_meta = {**existing_meta, **data, "onboarded": True}
+    user_id = str(user_response.user.id)
+    email = user_response.user.email or ""
 
-    client.auth.admin.update_user_by_id(
-        str(user_response.user.id),
-        {"user_metadata": updated_meta},
+    workspace_name = data.get("workspace_name") or "Mi Workspace"
+    slug = f"{_slugify(workspace_name)}-{user_id[:4]}"
+
+    # Create workspace row
+    ws_result = (
+        client.table("workspaces")
+        .insert({
+            "name": workspace_name,
+            "slug": slug,
+            "country": data.get("country", "El Salvador"),
+        })
+        .execute()
     )
+    workspace_id: str = ws_result.data[0]["id"]
 
-    # Invalidate cache so next get_user reads fresh metadata
+    # Create profile row (id == auth user id)
+    client.table("profiles").insert({
+        "id": user_id,
+        "workspace_id": workspace_id,
+        "email": email,
+        "full_name": data.get("full_name"),
+        "role": "owner",
+    }).execute()
+
+    # Store minimal flag + workspace_id in user_metadata for fast auth checks
+    existing_meta = user_response.user.user_metadata or {}
+    updated_meta = {
+        **existing_meta,
+        "onboarded": True,
+        "workspace_id": workspace_id,
+        "full_name": data.get("full_name"),
+        "industry": data.get("industry"),
+        "city": data.get("city"),
+    }
+    client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_meta})
+
     await cache.delete(_token_cache_key(token))
 
-    return _user_from_meta(
-        str(user_response.user.id),
-        user_response.user.email or "",
-        updated_meta,
-    )
+    return _user_from_meta(user_id, email, updated_meta)
 
 
 async def reset_password(access_token: str, new_password: str) -> None:

@@ -34,15 +34,26 @@ class OnboardingRequest(BaseModel):
     website: Optional[str] = Field(None, max_length=500)
 
 
+class ApproximateLocationRequest(BaseModel):
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+    label: Optional[str] = Field(None, max_length=200)
+
+
 class AuthUser(BaseModel):
     id: str
     email: str
     full_name: Optional[str] = None
     role: str = "viewer"
     onboarded: bool = False
+    workspace_id: Optional[str] = None
     workspace_name: Optional[str] = None
     industry: Optional[str] = None
+    country: Optional[str] = None
     city: Optional[str] = None
+    approximate_latitude: Optional[float] = None
+    approximate_longitude: Optional[float] = None
+    approximate_location_label: Optional[str] = None
 
 
 class AuthResponse(BaseModel):

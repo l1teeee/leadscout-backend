@@ -9,13 +9,14 @@ class Settings(BaseSettings):
     APP_HOST: str = "127.0.0.1"
     APP_PORT: int = 8000
 
-    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001"
 
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
 
     GOOGLE_PLACES_API_KEY: str = ""
     PAGESPEED_API_KEY: str = ""
+    MOCK_PLACES_ENABLED: bool = False
 
     REDIS_URL: str = ""
 

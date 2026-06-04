@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from app.schemas.auth_schema import (
+    ApproximateLocationRequest,
     AuthResponse,
     AuthUser,
     ForgotPasswordRequest,
@@ -65,6 +66,23 @@ async def me(authorization: Optional[str] = Header(None)):
     if not user:
         raise HTTPException(status_code=401, detail="Token invalido o expirado.")
     return user
+
+
+@router.put("/me/location", response_model=AuthUser)
+async def update_location(body: ApproximateLocationRequest, authorization: Optional[str] = Header(None)):
+    token = (authorization or "").removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="No autenticado.")
+    try:
+        return await auth_service.update_approximate_location(
+            token=token,
+            latitude=body.latitude,
+            longitude=body.longitude,
+            label=body.label,
+        )
+    except Exception as exc:
+        logger.error("Location update error: %s", exc)
+        raise HTTPException(status_code=400, detail="No se pudo guardar la ubicacion aproximada.")
 
 
 @router.post("/onboarding", response_model=AuthUser)

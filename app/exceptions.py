@@ -34,5 +34,5 @@ async def external_service_handler(request: Request, exc: ExternalServiceError) 
     logger.error("External service error [%s]: %s", exc.service, exc.message)
     return JSONResponse(
         status_code=502,
-        content={"detail": f"External service unavailable: {exc.service}"},
+        content={"detail": f"{exc.service}: {exc.message}"},
     )

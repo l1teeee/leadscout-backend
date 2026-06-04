@@ -2,10 +2,9 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
-from app.seeds.seed_data import SEED_LEADS
 from app.services import supabase_service
 
-_mock_store: list[dict] = list(SEED_LEADS)
+_mock_store: list[dict] = []
 
 DEFAULT_WORKSPACE_ID = "mock-workspace-id"
 
@@ -56,7 +55,7 @@ def list_leads(
     offset: int = 0,
 ) -> dict:
     db = _db()
-    if db:
+    if db and workspace_id != DEFAULT_WORKSPACE_ID:
         query = db.table("leads").select("*", count="exact").eq("workspace_id", workspace_id)
         if status:
             query = query.eq("status", status)
@@ -84,7 +83,7 @@ def list_leads(
 def list_all(workspace_id: str) -> list[dict]:
     """Used internally for aggregations - no pagination."""
     db = _db()
-    if db:
+    if db and workspace_id != DEFAULT_WORKSPACE_ID:
         return db.table("leads").select("*").eq("workspace_id", workspace_id).execute().data
     return list(_mock_store)
 
@@ -101,7 +100,7 @@ def create_lead(workspace_id: str, data: dict) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     lead = {"id": str(uuid4()), "workspace_id": workspace_id, "created_at": now, "updated_at": now, **data}
     db = _db()
-    if db:
+    if db and workspace_id != DEFAULT_WORKSPACE_ID:
         return db.table("leads").insert(lead).execute().data[0]
     _mock_store.append(lead)
     return lead

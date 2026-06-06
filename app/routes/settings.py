@@ -1,34 +1,58 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-from app.repositories import workspaces_repository
+from app.dependencies import CurrentToken, CurrentUser, CurrentWorkspace
+from app.exceptions import ProfileUpdateError, WorkspaceNotFoundError
+from app.schemas.auth_schema import AuthUser
+from app.schemas.settings_schema import (
+    TeamSettings,
+    UsageSettings,
+    UserProfileUpdate,
+    WorkspaceSettings,
+    WorkspaceUpdate,
+)
+from app.services import settings_service
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
-_MOCK_TEAM = [
-    {"id": "u1", "full_name": "Admin LeadScout", "email": "admin@leadscout.io", "role": "owner", "avatar_url": None},
-    {"id": "u2", "full_name": "Sales Rep", "email": "sales@leadscout.io", "role": "sales", "avatar_url": None},
-]
 
-_MOCK_USAGE = {
-    "leads_used": 148,
-    "leads_limit": 500,
-    "searches_used": 23,
-    "searches_limit": 100,
-    "api_calls_used": 71,
-    "api_calls_limit": 1000,
-}
+@router.get("/workspace", response_model=WorkspaceSettings)
+async def get_workspace(workspace_id: CurrentWorkspace):
+    try:
+        return settings_service.get_workspace(workspace_id)
+    except WorkspaceNotFoundError:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado.")
 
 
-@router.get("/workspace")
-def get_workspace():
-    return workspaces_repository.get_workspace("mock-workspace-id")
+@router.patch("/workspace", response_model=WorkspaceSettings)
+async def update_workspace(body: WorkspaceUpdate, workspace_id: CurrentWorkspace):
+    if not body.model_dump(exclude_none=True):
+        raise HTTPException(status_code=422, detail="No hay campos para actualizar.")
+    try:
+        return settings_service.update_workspace(workspace_id, body)
+    except WorkspaceNotFoundError:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado.")
 
 
-@router.get("/team")
-def get_team():
-    return {"members": _MOCK_TEAM}
+@router.get("/profile", response_model=AuthUser)
+async def get_profile(user: CurrentUser):
+    return user
 
 
-@router.get("/usage")
-def get_usage():
-    return _MOCK_USAGE
+@router.patch("/profile", response_model=AuthUser)
+async def update_profile(body: UserProfileUpdate, token: CurrentToken, _: CurrentUser):
+    if not body.model_dump(exclude_none=True):
+        raise HTTPException(status_code=422, detail="No hay campos para actualizar.")
+    try:
+        return await settings_service.update_profile(token, body)
+    except ProfileUpdateError as exc:
+        raise HTTPException(status_code=400, detail=exc.message)
+
+
+@router.get("/team", response_model=TeamSettings)
+async def get_team(workspace_id: CurrentWorkspace):
+    return settings_service.get_team(workspace_id)
+
+
+@router.get("/usage", response_model=UsageSettings)
+async def get_usage(workspace_id: CurrentWorkspace):
+    return settings_service.get_usage(workspace_id)

@@ -28,17 +28,14 @@ async def list_leads(workspace_id: str, filters: LeadFilters, pagination: Pagina
 
 
 async def get_lead(workspace_id: str, lead_id: str) -> dict:
-    lead = leads_repository.get_lead(lead_id)
+    lead = leads_repository.get_lead(lead_id, workspace_id=workspace_id)
     if not lead:
         raise LeadNotFoundError(lead_id)
     return lead
 
 
 async def create_lead(workspace_id: str, data: LeadCreate) -> dict:
-    payload = data.model_dump()
-    for field in ("status", "priority", "source"):
-        if hasattr(payload[field], "value"):
-            payload[field] = payload[field].value
+    payload = data.model_dump(mode="json")
     logger.info("Creating lead '%s' in workspace %s", data.name, workspace_id)
     result = leads_repository.create_lead(workspace_id, payload)
     await _invalidate_reports(workspace_id)
@@ -46,11 +43,8 @@ async def create_lead(workspace_id: str, data: LeadCreate) -> dict:
 
 
 async def update_lead(workspace_id: str, lead_id: str, data: LeadUpdate) -> dict:
-    payload = data.model_dump(exclude_none=True)
-    for field in ("status", "priority"):
-        if field in payload and hasattr(payload[field], "value"):
-            payload[field] = payload[field].value
-    updated = leads_repository.update_lead(lead_id, payload)
+    payload = data.model_dump(mode="json", exclude_none=True)
+    updated = leads_repository.update_lead(lead_id, payload, workspace_id=workspace_id)
     if not updated:
         raise LeadNotFoundError(lead_id)
     await _invalidate_reports(workspace_id)
@@ -58,7 +52,7 @@ async def update_lead(workspace_id: str, lead_id: str, data: LeadUpdate) -> dict
 
 
 async def delete_lead(workspace_id: str, lead_id: str) -> None:
-    if not leads_repository.delete_lead(lead_id):
+    if not leads_repository.delete_lead(lead_id, workspace_id=workspace_id):
         raise LeadNotFoundError(lead_id)
     await _invalidate_reports(workspace_id)
     logger.info("Deleted lead %s", lead_id)

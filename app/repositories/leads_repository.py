@@ -88,12 +88,18 @@ def list_all(workspace_id: str) -> list[dict]:
     return list(_mock_store)
 
 
-def get_lead(lead_id: str) -> Optional[dict]:
+def get_lead(lead_id: str, workspace_id: Optional[str] = None) -> Optional[dict]:
     db = _db()
     if db:
-        result = db.table("leads").select("*").eq("id", lead_id).maybe_single().execute()
+        query = db.table("leads").select("*").eq("id", lead_id)
+        if workspace_id:
+            query = query.eq("workspace_id", workspace_id)
+        result = query.maybe_single().execute()
         return result.data
-    return next((r for r in _mock_store if r["id"] == lead_id), None)
+    lead = next((r for r in _mock_store if r["id"] == lead_id), None)
+    if lead and workspace_id and lead.get("workspace_id") != workspace_id:
+        return None
+    return lead
 
 
 def create_lead(workspace_id: str, data: dict) -> dict:
@@ -106,26 +112,32 @@ def create_lead(workspace_id: str, data: dict) -> dict:
     return lead
 
 
-def update_lead(lead_id: str, data: dict) -> Optional[dict]:
+def update_lead(lead_id: str, data: dict, workspace_id: Optional[str] = None) -> Optional[dict]:
     data = {**data, "updated_at": datetime.now(timezone.utc).isoformat()}
     db = _db()
     if db:
-        result = db.table("leads").update(data).eq("id", lead_id).execute()
+        query = db.table("leads").update(data).eq("id", lead_id)
+        if workspace_id:
+            query = query.eq("workspace_id", workspace_id)
+        result = query.execute()
         return result.data[0] if result.data else None
     for i, r in enumerate(_mock_store):
-        if r["id"] == lead_id:
+        if r["id"] == lead_id and (not workspace_id or r.get("workspace_id") == workspace_id):
             _mock_store[i] = {**r, **data}
             return _mock_store[i]
     return None
 
 
-def delete_lead(lead_id: str) -> bool:
+def delete_lead(lead_id: str, workspace_id: Optional[str] = None) -> bool:
     db = _db()
     if db:
-        db.table("leads").delete().eq("id", lead_id).execute()
+        query = db.table("leads").delete().eq("id", lead_id)
+        if workspace_id:
+            query = query.eq("workspace_id", workspace_id)
+        query.execute()
         return True
     for i, r in enumerate(_mock_store):
-        if r["id"] == lead_id:
+        if r["id"] == lead_id and (not workspace_id or r.get("workspace_id") == workspace_id):
             _mock_store.pop(i)
             return True
     return False

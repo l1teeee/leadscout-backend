@@ -54,6 +54,7 @@ class AuthUser(BaseModel):
     approximate_latitude: Optional[float] = None
     approximate_longitude: Optional[float] = None
     approximate_location_label: Optional[str] = None
+    user_signature: Optional[str] = None
 
 
 class AuthResponse(BaseModel):

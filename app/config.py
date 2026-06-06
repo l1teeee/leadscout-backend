@@ -9,7 +9,13 @@ class Settings(BaseSettings):
     APP_HOST: str = "127.0.0.1"
     APP_PORT: int = 8000
 
-    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001"
+    # Comma-separated list of allowed browser origins.
+    # Used by both CORSMiddleware and OriginGuardMiddleware.
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001"
+
+    # Enable strict origin enforcement (require Origin header, block curl/Postman).
+    # Keep False in development; set True in production.
+    ORIGIN_GUARD_ENABLED: bool = False
 
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
@@ -20,11 +26,17 @@ class Settings(BaseSettings):
 
     REDIS_URL: str = ""
 
+    SIGNING_SECRET: str = ""
+
     LOG_LEVEL: str = "info"
 
     @property
-    def cors_origins_list(self) -> list[str]:
-        return [o.strip() for o in self.CORS_ORIGINS.split(",")]
+    def allowed_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
+
+    @property
+    def allowed_origins_set(self) -> frozenset[str]:
+        return frozenset(self.allowed_origins_list)
 
     @property
     def supabase_configured(self) -> bool:

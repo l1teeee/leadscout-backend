@@ -1,8 +1,9 @@
+import asyncio
 import logging
 import re
 
-from app.repositories import leads_repository
 from app.config import settings
+from app.repositories import leads_repository, search_audit_repository
 from app.schemas.explorer_schema import ExplorerResultItem, ExplorerSearchRequest, ExplorerSearchResponse
 from app.services import places_service, scoring_service
 
@@ -17,7 +18,35 @@ def _priority_from_score(score: int) -> str:
     return "baja"
 
 
-async def search_and_save(workspace_id: str, request: ExplorerSearchRequest) -> ExplorerSearchResponse:
+async def _log_search_audit(
+    user_id: str,
+    workspace_id: str,
+    request: ExplorerSearchRequest,
+    results_count: int,
+    saved_new: int,
+) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: search_audit_repository.log_search(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                query=request.query,
+                location=request.location,
+                category=request.category,
+                radius_km=request.radius_km,
+                latitude=request.latitude,
+                longitude=request.longitude,
+                results_count=results_count,
+                saved_new=saved_new,
+            ),
+        )
+    except Exception as exc:
+        logger.warning("Search audit task failed: %s", exc)
+
+
+async def search_and_save(workspace_id: str, user_id: str, request: ExplorerSearchRequest) -> ExplorerSearchResponse:
     logger.info(
         "Explorer search: query=%s location=%s radius=%.1fkm",
         request.query, request.location, request.radius_km,
@@ -42,9 +71,11 @@ async def search_and_save(workspace_id: str, request: ExplorerSearchRequest) -> 
                 latitude=request.latitude,
                 longitude=request.longitude,
             )
+            asyncio.create_task(_log_search_audit(user_id, workspace_id, request, len(results), saved_new))
             return ExplorerSearchResponse(results=results, total=len(results), saved_new=saved_new)
 
         logger.info("Google Places returned no real results; no leads saved.")
+        asyncio.create_task(_log_search_audit(user_id, workspace_id, request, 0, 0))
         return ExplorerSearchResponse(results=[], total=0, saved_new=0)
 
     results: list[ExplorerResultItem] = []
@@ -106,6 +137,7 @@ async def search_and_save(workspace_id: str, request: ExplorerSearchRequest) -> 
             })
             saved_new += 1
 
+    asyncio.create_task(_log_search_audit(user_id, workspace_id, request, len(results), saved_new))
     logger.info("Explorer complete: %d results, %d new leads saved", len(results), saved_new)
     return ExplorerSearchResponse(results=results, total=len(results), saved_new=saved_new)
 
@@ -178,7 +210,7 @@ def _phone_prefix(location: str) -> str:
         return "+54 387"
     if "guatemala" in normalized:
         return "+502"
-    if "honduras" in normalized or "tegucigalpa" in normalized:
+    if "honduras" in normalized or "tegucigalda" in normalized:
         return "+504"
     if "costa rica" in normalized or "san jose" in normalized:
         return "+506"

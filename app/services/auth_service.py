@@ -29,8 +29,8 @@ def _db():
 
 
 def _token_cache_key(token: str) -> str:
-    # Use only the first 40 chars so we never store full tokens in cache keys
-    return f"auth:user:{token[:40]}"
+    import hashlib
+    return f"auth:user:{hashlib.sha256(token.encode()).hexdigest()[:32]}"
 
 
 def _profile_for_user(client, user_id: str) -> dict:
@@ -123,12 +123,21 @@ def _round_approx(value: float) -> float:
     return round(value, 2)
 
 
+def _sign(user: AuthUser) -> AuthUser:
+    """Attach a fresh HMAC signature. Called after cache.set so cached data stays unsigned."""
+    from app.services import signing_service
+    sig = signing_service.generate_user_signature(user.id, user.workspace_id)
+    if sig:
+        return user.model_copy(update={"user_signature": sig})
+    return user
+
+
 async def login(email: str, password: str) -> AuthResponse:
     client = _db()
     if not client:
         logger.info("Mock auth: login %s", email)
         user = AuthUser(id="mock-user-id", email=email, full_name="Demo User", role="owner")
-        return AuthResponse(access_token=_mock_token(email), user=user)
+        return AuthResponse(access_token=_mock_token(email), user=_sign(user))
 
     response = client.auth.sign_in_with_password({"email": email, "password": password})
     meta = response.user.user_metadata or {}
@@ -137,7 +146,7 @@ async def login(email: str, password: str) -> AuthResponse:
     workspace = _workspace_for_id(client, meta.get("workspace_id") or profile.get("workspace_id"))
     user = _user_from_sources(user_id, response.user.email or email, meta, profile, workspace)
     await cache.set(_token_cache_key(response.session.access_token), user.model_dump(), ttl=TTL_AUTH_TOKEN)
-    return AuthResponse(access_token=response.session.access_token, user=user)
+    return AuthResponse(access_token=response.session.access_token, user=_sign(user))
 
 
 async def register(email: str, password: str, full_name: Optional[str] = None) -> None:
@@ -168,13 +177,13 @@ async def logout(token: str) -> None:
 
 async def get_user(token: str) -> Optional[AuthUser]:
     if _is_mock(token):
-        return _user_from_mock(token)
+        return _sign(_user_from_mock(token))
 
     key = _token_cache_key(token)
     cached = await cache.get(key)
     if cached is not None:
         logger.debug("Cache hit: auth token")
-        return AuthUser(**cached)
+        return _sign(AuthUser(**cached))
 
     client = _db()
     if not client:
@@ -188,7 +197,7 @@ async def get_user(token: str) -> Optional[AuthUser]:
         workspace = _workspace_for_id(client, meta.get("workspace_id") or profile.get("workspace_id"))
         user = _user_from_sources(user_id, response.user.email or "", meta, profile, workspace)
         await cache.set(key, user.model_dump(), ttl=TTL_AUTH_TOKEN)
-        return user
+        return _sign(user)
     except Exception:
         return None
 
@@ -213,7 +222,12 @@ async def complete_onboarding(token: str, data: dict) -> AuthUser:
     client = _db()
     if not client:
         logger.info("Mock auth: complete onboarding")
-        return AuthUser(id="mock-user-id", email="demo@example.com", full_name=data.get("full_name"), onboarded=True)
+        return _sign(AuthUser(
+            id="mock-user-id",
+            email="demo@example.com",
+            full_name=data.get("full_name"),
+            onboarded=True,
+        ))
 
     user_response = client.auth.get_user(token)
     user_id = str(user_response.user.id)
@@ -278,13 +292,13 @@ async def complete_onboarding(token: str, data: dict) -> AuthUser:
 
     await cache.delete(_token_cache_key(token))
 
-    return _user_from_meta(user_id, email, updated_meta)
+    return _sign(_user_from_meta(user_id, email, updated_meta))
 
 
 async def update_approximate_location(token: str, latitude: float, longitude: float, label: Optional[str]) -> AuthUser:
     if _is_mock(token):
         email = token[len(_MOCK_PREFIX):]
-        return AuthUser(
+        return _sign(AuthUser(
             id="mock-user-id",
             email=email,
             full_name="Demo User",
@@ -293,11 +307,11 @@ async def update_approximate_location(token: str, latitude: float, longitude: fl
             approximate_latitude=_round_approx(latitude),
             approximate_longitude=_round_approx(longitude),
             approximate_location_label=label,
-        )
+        ))
 
     client = _db()
     if not client:
-        return AuthUser(
+        return _sign(AuthUser(
             id="mock-user-id",
             email="demo@example.com",
             full_name="Demo User",
@@ -306,7 +320,7 @@ async def update_approximate_location(token: str, latitude: float, longitude: fl
             approximate_latitude=_round_approx(latitude),
             approximate_longitude=_round_approx(longitude),
             approximate_location_label=label,
-        )
+        ))
 
     user_response = client.auth.get_user(token)
     user_id = str(user_response.user.id)
@@ -338,7 +352,48 @@ async def update_approximate_location(token: str, latitude: float, longitude: fl
         logger.exception("Could not persist approximate location metadata for user %s", user_id)
 
     await cache.delete(_token_cache_key(token))
-    return _user_from_sources(user_id, email, {**meta, **location_meta}, profile, workspace)
+    return _sign(_user_from_sources(user_id, email, {**meta, **location_meta}, profile, workspace))
+
+
+async def update_profile(token: str, data: dict) -> AuthUser:
+    if _is_mock(token):
+        email = token[len(_MOCK_PREFIX):]
+        return _sign(AuthUser(
+            id="mock-user-id",
+            email=email,
+            full_name=data.get("full_name", "Demo User"),
+            role=data.get("role", "owner"),
+            workspace_id="mock-workspace-id",
+            onboarded=True,
+        ))
+
+    client = _db()
+    if not client:
+        return _sign(AuthUser(id="mock-user-id", email="demo@example.com", **data))
+
+    user_response = client.auth.get_user(token)
+    user_id = str(user_response.user.id)
+    email = user_response.user.email or ""
+    meta = user_response.user.user_metadata or {}
+
+    profile_update = {k: v for k, v in data.items() if k in ("full_name", "role")}
+    if profile_update:
+        try:
+            client.table("profiles").update(profile_update).eq("id", user_id).execute()
+        except Exception:
+            logger.exception("Could not update profile for user %s", user_id)
+
+    updated_meta = {**meta, **{k: v for k, v in data.items() if k in ("full_name", "role")}}
+    if updated_meta != meta:
+        try:
+            client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_meta})
+        except Exception:
+            logger.exception("Could not update user_metadata for user %s", user_id)
+
+    await cache.delete(_token_cache_key(token))
+    profile = _profile_for_user(client, user_id)
+    workspace = _workspace_for_id(client, updated_meta.get("workspace_id") or profile.get("workspace_id"))
+    return _sign(_user_from_sources(user_id, email, updated_meta, profile, workspace))
 
 
 async def reset_password(access_token: str, new_password: str) -> None:

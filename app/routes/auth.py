@@ -2,7 +2,10 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
+from slowapi.util import get_remote_address
 
+from app.dependencies import CurrentToken, CurrentUser
+from app.rate_limit import limiter
 from app.schemas.auth_schema import (
     ApproximateLocationRequest,
     AuthResponse,
@@ -33,7 +36,8 @@ def _friendly(exc: Exception) -> str:
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(body: LoginRequest):
+@limiter.limit("5/minute", key_func=get_remote_address)
+async def login(request: Request, body: LoginRequest):
     try:
         return await auth_service.login(body.email, body.password)
     except Exception as exc:
@@ -42,7 +46,8 @@ async def login(body: LoginRequest):
 
 
 @router.post("/register", status_code=201, response_model=MessageResponse)
-async def register(body: RegisterRequest):
+@limiter.limit("3/minute", key_func=get_remote_address)
+async def register(request: Request, body: RegisterRequest):
     try:
         await auth_service.register(body.email, body.password, body.full_name)
         return MessageResponse(message="Cuenta creada. Revisa tu email para confirmar.")
@@ -58,21 +63,12 @@ async def logout(authorization: Optional[str] = Header(None)):
 
 
 @router.get("/me", response_model=AuthUser)
-async def me(authorization: Optional[str] = Header(None)):
-    token = (authorization or "").removeprefix("Bearer ").strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="No autenticado.")
-    user = await auth_service.get_user(token)
-    if not user:
-        raise HTTPException(status_code=401, detail="Token invalido o expirado.")
+async def me(user: CurrentUser):
     return user
 
 
 @router.put("/me/location", response_model=AuthUser)
-async def update_location(body: ApproximateLocationRequest, authorization: Optional[str] = Header(None)):
-    token = (authorization or "").removeprefix("Bearer ").strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="No autenticado.")
+async def update_location(body: ApproximateLocationRequest, token: CurrentToken, _: CurrentUser):
     try:
         return await auth_service.update_approximate_location(
             token=token,
@@ -86,10 +82,7 @@ async def update_location(body: ApproximateLocationRequest, authorization: Optio
 
 
 @router.post("/onboarding", response_model=AuthUser)
-async def complete_onboarding(body: OnboardingRequest, authorization: Optional[str] = Header(None)):
-    token = (authorization or "").removeprefix("Bearer ").strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="No autenticado.")
+async def complete_onboarding(body: OnboardingRequest, token: CurrentToken, _: CurrentUser):
     try:
         return await auth_service.complete_onboarding(token, body.model_dump(exclude_none=True))
     except Exception as exc:
@@ -98,8 +91,8 @@ async def complete_onboarding(body: OnboardingRequest, authorization: Optional[s
 
 
 @router.post("/forgot-password", response_model=MessageResponse)
-async def forgot_password(body: ForgotPasswordRequest, request: Request):
-    # Always return success to avoid email enumeration
+@limiter.limit("3/minute", key_func=get_remote_address)
+async def forgot_password(request: Request, body: ForgotPasswordRequest):
     redirect_url = f"{request.base_url}reset-password"
     try:
         await auth_service.forgot_password(body.email, redirect_url)

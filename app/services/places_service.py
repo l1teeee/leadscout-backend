@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import logging
 
@@ -109,7 +110,7 @@ async def search_places(
 
         body: dict = {
             "textQuery": text_query,
-            "pageSize": 10,
+            "pageSize": 20,
             "languageCode": "es",
         }
         if latitude is not None and longitude is not None:
@@ -142,6 +143,26 @@ async def search_places(
         resp.raise_for_status()
         payload = resp.json()
         results = [_normalize_place(place) for place in payload.get("places", [])]
+
+        next_token = payload.get("nextPageToken")
+        if next_token:
+            try:
+                await asyncio.sleep(2)
+                page2_resp = await client.post(
+                    _TEXTSEARCH_URL,
+                    json={"pageToken": next_token},
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Goog-Api-Key": settings.GOOGLE_PLACES_API_KEY,
+                        "X-Goog-FieldMask": _TEXTSEARCH_FIELD_MASK,
+                    },
+                )
+                page2_resp.raise_for_status()
+                page2_payload = page2_resp.json()
+                results += [_normalize_place(p) for p in page2_payload.get("places", [])]
+            except Exception:
+                pass
+
         if results:
             await cache.set(key, results, ttl=TTL_PLACES)
         return results

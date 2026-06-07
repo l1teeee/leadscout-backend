@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import math
+import time
 
 from app.exceptions import ExternalServiceError
 from app.repositories import leads_repository, search_audit_repository
@@ -9,12 +10,75 @@ from app.schemas.explorer_schema import (
     ExplorerSearchRequest,
     ExplorerSearchResponse,
 )
-from app.services import ai_service, places_service, scoring_service
+from app.services import ai_service, pagespeed_service, places_service, scoring_service
 
 logger = logging.getLogger(__name__)
 
 # Max concurrent place-detail fetches + DB writes. Keeps DNS/connection load low.
 _PLACE_SEM = asyncio.Semaphore(10)
+
+_GENERIC_QUERY_GROUPS = [
+    [
+        "restaurantes cafeterías bares",
+        "médicos clínicas dentistas",
+        "hoteles hospedajes turismo",
+        "tiendas farmacias supermercados",
+        "salones gimnasios servicios profesionales",
+    ],
+    [
+        "panaderías pupuserías comedores",
+        "talleres mecánicos llanterías",
+        "peluquerías barberías salones de belleza",
+        "ferreterías materiales de construcción",
+        "veterinarias mascotas",
+    ],
+    [
+        "abogados contadores notarios",
+        "colegios academias tutorías",
+        "librerías papelerías imprentas",
+        "ópticas joyerías relojería",
+        "fontanería electricistas plomería",
+    ],
+]
+
+_SPECIFIC_QUERY_GROUPS = [
+    lambda q: [q, f"negocios de {q}", f"servicios de {q}", f"empresas {q}", f"comercios {q}"],
+    lambda q: [q, f"{q} local", f"{q} pequeño negocio", f"{q} independiente", f"micro empresa {q}"],
+    lambda q: [q, f"{q} cercano", f"{q} en el barrio", f"{q} pequeño", f"{q} artesanal"],
+]
+
+
+def _query_group_index() -> int:
+    return int(time.time() // 3600) % 3
+
+
+_CATEGORY_ID_MAP = {
+    "food": "Gastronomía",
+    "retail": "Retail",
+    "services": "Servicios",
+    "health": "Salud",
+    "sports": "Deportes",
+}
+
+_QUERY_KEYWORD_MAP = [
+    (["restaurante", "cafetería", "bar", "panadería", "pupusería", "comedor", "gastro", "comida", "bebida"], "Gastronomía"),
+    (["médico", "clínica", "dentista", "doctor", "farmacia", "hospital", "optometrista"], "Salud"),
+    (["peluquería", "salón", "barbería", "estética", "belleza", "spa", "uña"], "Estética"),
+    (["tienda", "ferretería", "librería", "moda", "ropa", "calzado", "joyería", "óptica"], "Retail"),
+    (["abogado", "contador", "notario", "taller", "mecánico", "fontanería", "electricista", "plomero", "servicio"], "Servicios"),
+    (["deporte", "gimnasio", "sport", "fitness", "yoga", "pilates"], "Deportes"),
+]
+
+
+def _infer_category(query: str, category_id: str) -> str:
+    if category_id and category_id != "all":
+        return _CATEGORY_ID_MAP.get(category_id, "Servicios")
+    q = query.lower()
+    for keywords, label in _QUERY_KEYWORD_MAP:
+        if any(kw in q for kw in keywords):
+            return label
+    return "Servicios"
+
 
 # Well-known chains and franchises to exclude from lead results.
 _EXCLUDED_BRANDS: frozenset[str] = frozenset({
@@ -150,7 +214,7 @@ async def _process_place(
 
             place_resource_name = place.get("place_resource_name") or place_id
             details = await places_service.get_place_details(place_resource_name) if place_resource_name else {}
-            place_data = {**place, **details, "category": request.category, "location": request.location}
+            place_data = {**place, **details, "category": _infer_category(request.query, request.category), "location": request.location}
             geo = place_data.get("geometry", {}).get("location", {})
             latitude = geo.get("lat")
             longitude = geo.get("lng")
@@ -182,25 +246,38 @@ async def _process_place(
             # Run sync Supabase calls in the thread pool to avoid blocking the event loop
             existing = None
             if place_id:
-                existing = await loop.run_in_executor(None, leads_repository.find_by_place_id, place_id)
+                existing = await loop.run_in_executor(None, lambda: leads_repository.find_by_place_id(place_id, workspace_id))
 
             has_website = bool(place_data.get("website"))
             has_phone = bool(place_data.get("formatted_phone_number"))
             has_rating = bool(place_data.get("rating"))
+            website_url: str = place_data.get("website") or ""
+
+            website_has_ssl: bool | None = website_url.startswith("https://") if has_website else None
+
+            pagespeed: int | None = None
+            if has_website:
+                try:
+                    pagespeed = await asyncio.wait_for(
+                        pagespeed_service.get_pagespeed_score(website_url),
+                        timeout=8.0,
+                    )
+                except Exception:
+                    pagespeed = None
 
             score, issues = scoring_service.calculate_score(
                 has_website=has_website,
                 has_phone=has_phone,
                 has_rating=has_rating,
-                website_has_ssl=False,
-                pagespeed_score=None,
+                website_has_ssl=website_has_ssl,
+                pagespeed_score=pagespeed,
                 has_complete_google_business=has_rating and has_phone,
             )
 
             item = ExplorerResultItem(
                 google_place_id=place_id,
                 name=place_data.get("name", ""),
-                category=request.category,
+                category=_infer_category(request.query, request.category),
                 address=place_data.get("formatted_address"),
                 location=request.location,
                 latitude=latitude,
@@ -252,28 +329,40 @@ async def search_and_save(workspace_id: str, user_id: str, request: ExplorerSear
 
     _GENERIC = {"local businesses", "negocios locales", "comercios", "general", "todas", "todos", "all", ""}
     base_query = request.query.strip()
+    group_idx = _query_group_index()
+
     if base_query.lower() in _GENERIC:
-        alt_queries = [
-            "restaurantes cafeterías bares",
-            "médicos clínicas dentistas",
-            "hoteles hospedajes turismo",
-            "tiendas farmacias supermercados",
-            "salones gimnasios servicios profesionales",
-        ]
+        # Group A always as main queries (broadest coverage, most reliable for any zone).
+        # Rotating groups B/C are used only for sub-zone corner searches to add variety on re-scans
+        # without risking a full blackout from niche queries.
+        alt_queries = _GENERIC_QUERY_GROUPS[0]
+        sub_base_query = _GENERIC_QUERY_GROUPS[group_idx][0]
     else:
-        alt_queries = [
-            base_query,
-            f"negocios de {base_query}",
-            f"servicios de {base_query}",
-            f"empresas {base_query}",
-            f"comercios {base_query}",
-        ]
+        alt_queries = _SPECIFIC_QUERY_GROUPS[0](base_query)
+        sub_base_query = _SPECIFIC_QUERY_GROUPS[group_idx](base_query)[0]
 
     search_tasks = [
         places_service.search_places(q, request.location, radius_m, request.latitude, request.longitude)
         for q in alt_queries
     ]
-    all_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+    sub_tasks = []
+    if request.latitude is not None and request.longitude is not None:
+        lat_offset = (request.radius_km * 0.5) / 111.32
+        lng_offset = (request.radius_km * 0.5) / (111.32 * math.cos(math.radians(request.latitude)))
+        sub_centers = [
+            (request.latitude + lat_offset, request.longitude + lng_offset),
+            (request.latitude + lat_offset, request.longitude - lng_offset),
+            (request.latitude - lat_offset, request.longitude + lng_offset),
+            (request.latitude - lat_offset, request.longitude - lng_offset),
+        ]
+        sub_radius_m = int(request.radius_km * 0.65 * 1000)
+        sub_tasks = [
+            places_service.search_places(sub_base_query, request.location, sub_radius_m, sub_lat, sub_lng)
+            for sub_lat, sub_lng in sub_centers
+        ]
+
+    all_results = await asyncio.gather(*search_tasks, *sub_tasks, return_exceptions=True)
 
     seen_ids: set[str] = set()
     raw_places: list[dict] = []

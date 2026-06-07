@@ -33,6 +33,8 @@ def list_leads(
         query = query.eq("priority", priority)
     if category:
         query = query.eq("category", category)
+    if q:
+        query = query.or_(f"name.ilike.%{q}%,address.ilike.%{q}%")
     if min_score is not None:
         query = query.gte("score", min_score)
     if max_score is not None:
@@ -40,9 +42,6 @@ def list_leads(
     query = query.order(sort_by, desc=(sort_order == "desc"))
     result = query.range(offset, offset + limit - 1).execute()
     data = result.data
-    if q:
-        ql = q.lower()
-        data = [r for r in data if ql in r["name"].lower() or ql in (r.get("address") or "").lower()]
     return {"data": data, "total": result.count or len(data), "limit": limit, "offset": offset}
 
 
@@ -87,7 +86,33 @@ def delete_lead(lead_id: str, workspace_id: str | None = None) -> bool:
     return True
 
 
-def find_by_place_id(google_place_id: str) -> dict | None:
+def find_by_place_id(google_place_id: str, workspace_id: str) -> dict | None:
     db = _db_required()
-    result = db.table("leads").select("id").eq("google_place_id", google_place_id).execute()
+    result = (
+        db.table("leads")
+        .select("id")
+        .eq("google_place_id", google_place_id)
+        .eq("workspace_id", workspace_id)
+        .execute()
+    )
     return result.data[0] if result.data else None
+
+
+def get_workspace_stats(workspace_id: str) -> dict:
+    db = _db_required()
+    rows = db.table("leads").select("score,priority,last_contact,status").eq("workspace_id", workspace_id).execute().data or []
+    total = len(rows)
+    high_priority = sum(1 for r in rows if r.get("priority") == "alta")
+    no_contact = sum(1 for r in rows if not r.get("last_contact"))
+    avg_score = round(sum(r.get("score", 0) for r in rows) / total) if total > 0 else 0
+    by_status: dict[str, int] = {}
+    for r in rows:
+        s = r.get("status", "nuevo")
+        by_status[s] = by_status.get(s, 0) + 1
+    return {
+        "total": total,
+        "high_priority_count": high_priority,
+        "no_contact_count": no_contact,
+        "avg_score": avg_score,
+        "by_status": by_status,
+    }

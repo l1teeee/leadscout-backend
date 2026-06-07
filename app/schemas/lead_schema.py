@@ -39,6 +39,7 @@ class LeadUpdate(BaseModel):
     phone: Optional[str] = Field(None, max_length=50)
     website: Optional[str] = Field(None, max_length=500)
     last_contact: Optional[date] = None
+    ai_analysis: Optional[str] = None
 
 
 class LeadResponse(BaseModel):
@@ -59,6 +60,7 @@ class LeadResponse(BaseModel):
     google_place_id: Optional[str] = None
     source: LeadSource
     last_contact: Optional[date] = None
+    ai_analysis: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

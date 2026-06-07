@@ -1,9 +1,11 @@
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 
 from app.dependencies import CurrentWorkspace
 from app.rate_limit import limiter
+from app.repositories import leads_repository
 from app.schemas.common import MAX_PAGE_LIMIT, PaginationParams
 from app.schemas.enums import LeadPriority, LeadStatus
 from app.schemas.lead_schema import LeadCreate, LeadFilters, LeadListResponse, LeadResponse, LeadUpdate
@@ -33,6 +35,15 @@ async def list_leads(
     )
     pagination = PaginationParams(limit=limit, offset=offset)
     return await leads_service.list_leads(workspace_id, filters, pagination)
+
+
+@router.get("/stats")
+async def get_lead_stats(workspace_id: CurrentWorkspace):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: leads_repository.get_workspace_stats(workspace_id),
+    )
 
 
 @router.get("/{lead_id}", response_model=LeadResponse)

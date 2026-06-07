@@ -21,7 +21,7 @@ def calculate_score(
     has_website: bool,
     has_phone: bool,
     has_rating: bool,
-    website_has_ssl: bool,
+    website_has_ssl: bool | None,
     pagespeed_score: int | None,
     has_complete_google_business: bool,
 ) -> tuple[int, list[str]]:
@@ -29,7 +29,8 @@ def calculate_score(
         (not has_website, _NO_WEBSITE),
         (not has_phone, _NO_PHONE),
         (not has_rating, _NO_RATING),
-        (has_website and not website_has_ssl, _NO_SSL),
+        # Only penalize SSL when explicitly verified as missing (None = not checked yet)
+        (has_website and website_has_ssl is False, _NO_SSL),
         (pagespeed_score is not None and pagespeed_score < PAGESPEED_THRESHOLD, _LOW_PAGESPEED),
         (not has_complete_google_business, _INCOMPLETE_GMB),
     ]

@@ -6,6 +6,7 @@ class LeadStatus(str, Enum):
     contactado = "contactado"
     calificado = "calificado"
     perdido = "perdido"
+    desvinculado = "desvinculado"
 
 
 class LeadPriority(str, Enum):

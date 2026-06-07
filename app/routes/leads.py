@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query, Request
 
 from app.dependencies import CurrentWorkspace
 from app.rate_limit import limiter
-from app.schemas.common import PaginationParams
+from app.schemas.common import MAX_PAGE_LIMIT, PaginationParams
 from app.schemas.enums import LeadPriority, LeadStatus
 from app.schemas.lead_schema import LeadCreate, LeadFilters, LeadListResponse, LeadResponse, LeadUpdate
 from app.services import leads_service
@@ -21,12 +21,15 @@ async def list_leads(
     category: Optional[str] = Query(None, max_length=100),
     min_score: Optional[int] = Query(None, ge=0, le=100),
     max_score: Optional[int] = Query(None, ge=0, le=100),
-    limit: int = Query(50, ge=1, le=200),
+    sort_by: Optional[str] = Query("created_at", max_length=50),
+    sort_order: Optional[str] = Query("desc", pattern="^(asc|desc)$"),
+    limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
     offset: int = Query(0, ge=0),
 ):
     filters = LeadFilters(
         q=q, status=status, priority=priority,
         category=category, min_score=min_score, max_score=max_score,
+        sort_by=sort_by, sort_order=sort_order,
     )
     pagination = PaginationParams(limit=limit, offset=offset)
     return await leads_service.list_leads(workspace_id, filters, pagination)

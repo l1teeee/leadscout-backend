@@ -31,3 +31,17 @@ class ExplorerSearchResponse(BaseModel):
     results: list[ExplorerResultItem]
     total: int
     saved_new: int
+
+
+class LeadAnalyzeRequest(BaseModel):
+    name: str = Field(..., max_length=300)
+    category: str = Field("", max_length=100)
+    location: str = Field("", max_length=300)
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    score: int = Field(0, ge=0, le=100)
+    issues: list[str] = []
+
+
+class LeadAnalyzeResponse(BaseModel):
+    analysis: str

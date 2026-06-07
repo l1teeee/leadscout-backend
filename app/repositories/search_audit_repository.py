@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from app.services import supabase_service
 
@@ -13,14 +12,14 @@ def log_search(
     location: str,
     category: str,
     radius_km: float,
-    latitude: Optional[float],
-    longitude: Optional[float],
+    latitude: float | None,
+    longitude: float | None,
     results_count: int,
     saved_new: int,
 ) -> None:
     db = supabase_service.get_client()
     if not db:
-        logger.debug("Mock mode: skipping search audit for user %s", user_id)
+        logger.debug("Supabase not configured: skipping search audit for user %s", user_id)
         return
     try:
         db.table("search_audit_logs").insert({

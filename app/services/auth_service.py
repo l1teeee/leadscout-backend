@@ -1,31 +1,23 @@
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from app.cache import TTL_AUTH_TOKEN, cache
+from app.exceptions import ExternalServiceError
 from app.schemas.auth_schema import AuthResponse, AuthUser
 
 logger = logging.getLogger(__name__)
-
-_MOCK_PREFIX = "mock::"
-
-
-def _mock_token(email: str) -> str:
-    return f"{_MOCK_PREFIX}{email}"
-
-
-def _is_mock(token: str) -> bool:
-    return token.startswith(_MOCK_PREFIX)
-
-
-def _user_from_mock(token: str) -> AuthUser:
-    email = token[len(_MOCK_PREFIX):]
-    return AuthUser(id="mock-user-id", email=email, full_name="Demo User", role="owner", workspace_id="mock-workspace-id")
 
 
 def _db():
     from app.services import supabase_service
     return supabase_service.get_client()
+
+
+def _db_required():
+    client = _db()
+    if not client:
+        raise ExternalServiceError("Supabase", "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.")
+    return client
 
 
 def _token_cache_key(token: str) -> str:
@@ -63,7 +55,7 @@ def _profile_for_user(client, user_id: str) -> dict:
             return {}
 
 
-def _workspace_for_id(client, workspace_id: Optional[str]) -> dict:
+def _workspace_for_id(client, workspace_id: str | None) -> dict:
     if not workspace_id:
         return {}
     try:
@@ -133,11 +125,7 @@ def _sign(user: AuthUser) -> AuthUser:
 
 
 async def login(email: str, password: str) -> AuthResponse:
-    client = _db()
-    if not client:
-        logger.info("Mock auth: login %s", email)
-        user = AuthUser(id="mock-user-id", email=email, full_name="Demo User", role="owner")
-        return AuthResponse(access_token=_mock_token(email), user=_sign(user))
+    client = _db_required()
 
     response = client.auth.sign_in_with_password({"email": email, "password": password})
     meta = response.user.user_metadata or {}
@@ -149,11 +137,8 @@ async def login(email: str, password: str) -> AuthResponse:
     return AuthResponse(access_token=response.session.access_token, user=_sign(user))
 
 
-async def register(email: str, password: str, full_name: Optional[str] = None) -> None:
-    client = _db()
-    if not client:
-        logger.info("Mock auth: register %s", email)
-        return
+async def register(email: str, password: str, full_name: str | None = None) -> None:
+    client = _db_required()
 
     options: dict = {}
     if full_name:
@@ -164,8 +149,6 @@ async def register(email: str, password: str, full_name: Optional[str] = None) -
 
 async def logout(token: str) -> None:
     await cache.delete(_token_cache_key(token))
-    if _is_mock(token):
-        return
     client = _db()
     if not client:
         return
@@ -175,10 +158,7 @@ async def logout(token: str) -> None:
         pass  # Best-effort: token may already be expired
 
 
-async def get_user(token: str) -> Optional[AuthUser]:
-    if _is_mock(token):
-        return _sign(_user_from_mock(token))
-
+async def get_user(token: str) -> AuthUser | None:
     key = _token_cache_key(token)
     cached = await cache.get(key)
     if cached is not None:
@@ -203,10 +183,7 @@ async def get_user(token: str) -> Optional[AuthUser]:
 
 
 async def forgot_password(email: str, redirect_url: str) -> None:
-    client = _db()
-    if not client:
-        logger.info("Mock auth: forgot password for %s", email)
-        return
+    client = _db_required()
     client.auth.reset_password_for_email(email, {"redirect_to": redirect_url})
 
 
@@ -219,15 +196,7 @@ def _slugify(text: str) -> str:
 
 
 async def complete_onboarding(token: str, data: dict) -> AuthUser:
-    client = _db()
-    if not client:
-        logger.info("Mock auth: complete onboarding")
-        return _sign(AuthUser(
-            id="mock-user-id",
-            email="demo@example.com",
-            full_name=data.get("full_name"),
-            onboarded=True,
-        ))
+    client = _db_required()
 
     user_response = client.auth.get_user(token)
     user_id = str(user_response.user.id)
@@ -295,32 +264,8 @@ async def complete_onboarding(token: str, data: dict) -> AuthUser:
     return _sign(_user_from_meta(user_id, email, updated_meta))
 
 
-async def update_approximate_location(token: str, latitude: float, longitude: float, label: Optional[str]) -> AuthUser:
-    if _is_mock(token):
-        email = token[len(_MOCK_PREFIX):]
-        return _sign(AuthUser(
-            id="mock-user-id",
-            email=email,
-            full_name="Demo User",
-            role="owner",
-            workspace_id="mock-workspace-id",
-            approximate_latitude=_round_approx(latitude),
-            approximate_longitude=_round_approx(longitude),
-            approximate_location_label=label,
-        ))
-
-    client = _db()
-    if not client:
-        return _sign(AuthUser(
-            id="mock-user-id",
-            email="demo@example.com",
-            full_name="Demo User",
-            role="owner",
-            workspace_id="mock-workspace-id",
-            approximate_latitude=_round_approx(latitude),
-            approximate_longitude=_round_approx(longitude),
-            approximate_location_label=label,
-        ))
+async def update_approximate_location(token: str, latitude: float, longitude: float, label: str | None) -> AuthUser:
+    client = _db_required()
 
     user_response = client.auth.get_user(token)
     user_id = str(user_response.user.id)
@@ -340,7 +285,7 @@ async def update_approximate_location(token: str, latitude: float, longitude: fl
     try:
         client.table("profiles").update({
             **location_meta,
-            "location_updated_at": datetime.now(timezone.utc).isoformat(),
+            "location_updated_at": datetime.now(UTC).isoformat(),
         }).eq("id", user_id).execute()
         profile = {**profile, **location_meta}
     except Exception:
@@ -356,20 +301,7 @@ async def update_approximate_location(token: str, latitude: float, longitude: fl
 
 
 async def update_profile(token: str, data: dict) -> AuthUser:
-    if _is_mock(token):
-        email = token[len(_MOCK_PREFIX):]
-        return _sign(AuthUser(
-            id="mock-user-id",
-            email=email,
-            full_name=data.get("full_name", "Demo User"),
-            role=data.get("role", "owner"),
-            workspace_id="mock-workspace-id",
-            onboarded=True,
-        ))
-
-    client = _db()
-    if not client:
-        return _sign(AuthUser(id="mock-user-id", email="demo@example.com", **data))
+    client = _db_required()
 
     user_response = client.auth.get_user(token)
     user_id = str(user_response.user.id)
@@ -398,10 +330,7 @@ async def update_profile(token: str, data: dict) -> AuthUser:
 
 async def reset_password(access_token: str, new_password: str) -> None:
     await cache.delete(_token_cache_key(access_token))
-    client = _db()
-    if not client:
-        logger.info("Mock auth: reset password")
-        return
+    client = _db_required()
 
     user_response = client.auth.get_user(access_token)
     client.auth.admin.update_user_by_id(

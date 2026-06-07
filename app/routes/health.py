@@ -17,7 +17,7 @@ async def health():
         from app.services.supabase_service import get_client
         client = get_client()
         if client is None:
-            checks["supabase"] = "mock"
+            checks["supabase"] = "not_configured"
         else:
             client.table("workspaces").select("id").limit(1).execute()
             checks["supabase"] = "ok"
@@ -36,7 +36,7 @@ async def health():
         logger.warning("Cache health check failed: %s", exc)
         checks["cache"] = "error"
 
-    status = "ok" if "error" not in checks.values() else "degraded"
+    status = "degraded" if {"error", "not_configured"} & set(checks.values()) else "ok"
     return {
         "status": status,
         "service": settings.APP_NAME,

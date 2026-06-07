@@ -1,8 +1,31 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
+
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
+
+_BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(_BACKEND_ROOT / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return init_settings, dotenv_settings, env_settings, file_secret_settings
 
     APP_NAME: str = "LeadScout AI Backend"
     APP_ENV: str = "development"
@@ -22,11 +45,13 @@ class Settings(BaseSettings):
 
     GOOGLE_PLACES_API_KEY: str = ""
     PAGESPEED_API_KEY: str = ""
-    MOCK_PLACES_ENABLED: bool = False
 
     REDIS_URL: str = ""
 
     SIGNING_SECRET: str = ""
+
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
 
     LOG_LEVEL: str = "info"
 
@@ -45,6 +70,10 @@ class Settings(BaseSettings):
     @property
     def google_places_configured(self) -> bool:
         return bool(self.GOOGLE_PLACES_API_KEY)
+
+    @property
+    def openai_configured(self) -> bool:
+        return bool(self.OPENAI_API_KEY)
 
 
 settings = Settings()

@@ -63,6 +63,9 @@ class LeadResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
 
+_SORTABLE_FIELDS = {"name", "score", "status", "priority", "created_at", "updated_at"}
+
+
 class LeadFilters(BaseModel):
     q: Optional[str] = Field(None, max_length=200)
     status: Optional[LeadStatus] = None
@@ -70,6 +73,12 @@ class LeadFilters(BaseModel):
     category: Optional[str] = Field(None, max_length=100)
     min_score: Optional[int] = Field(None, ge=0, le=100)
     max_score: Optional[int] = Field(None, ge=0, le=100)
+    sort_by: Optional[str] = Field("created_at", max_length=50)
+    sort_order: Optional[str] = Field("desc", pattern="^(asc|desc)$")
+
+    @property
+    def safe_sort_by(self) -> str:
+        return self.sort_by if self.sort_by in _SORTABLE_FIELDS else "created_at"
 
 
 class LeadListResponse(PaginatedResponse[LeadResponse]):

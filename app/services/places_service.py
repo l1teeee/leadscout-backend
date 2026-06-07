@@ -22,9 +22,37 @@ _DETAILS_FIELD_MASK = (
 )
 _TIMEOUT = 15.0
 
+# Shared client — reuses TCP connections to places.googleapis.com so DNS is
+# resolved once per process instead of once per call. Limited to 10 connections.
+_http: httpx.AsyncClient | None = None
 
-def _places_key(query: str, location: str, radius_m: int) -> str:
-    raw = f"{query}:{location}:{radius_m}".lower()
+
+def _get_http() -> httpx.AsyncClient:
+    global _http
+    if _http is None:
+        _http = httpx.AsyncClient(
+            timeout=_TIMEOUT,
+            limits=httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+                keepalive_expiry=30.0,
+            ),
+        )
+    return _http
+
+
+def _places_key(
+    query: str,
+    location: str,
+    radius_m: int,
+    latitude: float | None = None,
+    longitude: float | None = None,
+) -> str:
+    if latitude is not None and longitude is not None:
+        zone_key = f"{latitude:.5f}:{longitude:.5f}"
+    else:
+        zone_key = "no-coordinates"
+    raw = f"{query}:{location}:{radius_m}:{zone_key}".lower()
     return f"places:{hashlib.md5(raw.encode()).hexdigest()}"
 
 
@@ -64,49 +92,59 @@ async def search_places(
     longitude: float | None = None,
 ) -> list[dict]:
     if not settings.google_places_configured:
-        if settings.MOCK_PLACES_ENABLED:
-            return []
         raise ExternalServiceError("Google Places", "GOOGLE_PLACES_API_KEY is not configured.")
 
-    key = _places_key(query, location, radius_m)
+    key = _places_key(query, location, radius_m, latitude, longitude)
     cached = await cache.get(key)
     if cached is not None:
         logger.debug("Cache hit: places search %s in %s", query, location)
         return cached
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            body: dict = {
-                "textQuery": f"{query} en {location}",
-                "pageSize": 12,
-                "languageCode": "es",
-            }
-            if latitude is not None and longitude is not None:
-                body["locationBias"] = {
-                    "circle": {
-                        "center": {
-                            "latitude": latitude,
-                            "longitude": longitude,
-                        },
-                        "radius": radius_m,
-                    }
-                }
+        client = _get_http()
+        if latitude is not None and longitude is not None:
+            text_query = query
+        else:
+            text_query = f"{query} en {location}"
 
-            resp = await client.post(
-                _TEXTSEARCH_URL,
-                json=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Goog-Api-Key": settings.GOOGLE_PLACES_API_KEY,
-                    "X-Goog-FieldMask": _TEXTSEARCH_FIELD_MASK,
-                },
-            )
-            resp.raise_for_status()
-            payload = resp.json()
-            results = [_normalize_place(place) for place in payload.get("places", [])]
-            if results:
-                await cache.set(key, results, ttl=TTL_PLACES)
-            return results
+        body: dict = {
+            "textQuery": text_query,
+            "pageSize": 10,
+            "languageCode": "es",
+        }
+        if latitude is not None and longitude is not None:
+            import math
+            delta_lat = radius_m / 111_320
+            delta_lng = radius_m / (111_320 * math.cos(math.radians(latitude)))
+            body["rankPreference"] = "DISTANCE"
+            body["locationRestriction"] = {
+                "rectangle": {
+                    "low": {
+                        "latitude": latitude - delta_lat,
+                        "longitude": longitude - delta_lng,
+                    },
+                    "high": {
+                        "latitude": latitude + delta_lat,
+                        "longitude": longitude + delta_lng,
+                    },
+                }
+            }
+
+        resp = await client.post(
+            _TEXTSEARCH_URL,
+            json=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": settings.GOOGLE_PLACES_API_KEY,
+                "X-Goog-FieldMask": _TEXTSEARCH_FIELD_MASK,
+            },
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        results = [_normalize_place(place) for place in payload.get("places", [])]
+        if results:
+            await cache.set(key, results, ttl=TTL_PLACES)
+        return results
     except httpx.TimeoutException:
         logger.warning("Google Places timeout: query=%s", query)
         return []
@@ -129,20 +167,20 @@ async def get_place_details(place_name: str) -> dict:
         return cached
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resource = place_name if place_name.startswith("places/") else f"places/{place_name}"
-            resp = await client.get(
-                f"{_DETAILS_URL}/{resource}",
-                headers={
-                    "X-Goog-Api-Key": settings.GOOGLE_PLACES_API_KEY,
-                    "X-Goog-FieldMask": _DETAILS_FIELD_MASK,
-                },
-            )
-            resp.raise_for_status()
-            result = _normalize_place(resp.json())
-            if result:
-                await cache.set(key, result, ttl=TTL_PLACES)
-            return result
+        client = _get_http()
+        resource = place_name if place_name.startswith("places/") else f"places/{place_name}"
+        resp = await client.get(
+            f"{_DETAILS_URL}/{resource}",
+            headers={
+                "X-Goog-Api-Key": settings.GOOGLE_PLACES_API_KEY,
+                "X-Goog-FieldMask": _DETAILS_FIELD_MASK,
+            },
+        )
+        resp.raise_for_status()
+        result = _normalize_place(resp.json())
+        if result:
+            await cache.set(key, result, ttl=TTL_PLACES)
+        return result
     except httpx.TimeoutException:
         logger.warning("Google Places details timeout: place_name=%s", place_name)
         return {}

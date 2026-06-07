@@ -1,10 +1,10 @@
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from slowapi.util import get_remote_address
 
 from app.dependencies import CurrentToken, CurrentUser
+from app.exceptions import ExternalServiceError
 from app.rate_limit import limiter
 from app.schemas.auth_schema import (
     ApproximateLocationRequest,
@@ -40,6 +40,8 @@ def _friendly(exc: Exception) -> str:
 async def login(request: Request, body: LoginRequest):
     try:
         return await auth_service.login(body.email, body.password)
+    except ExternalServiceError as exc:
+        raise HTTPException(status_code=503, detail=exc.message)
     except Exception as exc:
         logger.warning("Login failed for %s: %s", body.email, exc)
         raise HTTPException(status_code=401, detail=_friendly(exc))
@@ -51,12 +53,14 @@ async def register(request: Request, body: RegisterRequest):
     try:
         await auth_service.register(body.email, body.password, body.full_name)
         return MessageResponse(message="Cuenta creada. Revisa tu email para confirmar.")
+    except ExternalServiceError as exc:
+        raise HTTPException(status_code=503, detail=exc.message)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=_friendly(exc))
 
 
 @router.post("/logout", response_model=MessageResponse)
-async def logout(authorization: Optional[str] = Header(None)):
+async def logout(authorization: str | None = Header(None)):
     token = (authorization or "").removeprefix("Bearer ").strip()
     await auth_service.logout(token)
     return MessageResponse(message="Sesion cerrada.")
@@ -76,6 +80,8 @@ async def update_location(body: ApproximateLocationRequest, token: CurrentToken,
             longitude=body.longitude,
             label=body.label,
         )
+    except ExternalServiceError as exc:
+        raise HTTPException(status_code=503, detail=exc.message)
     except Exception as exc:
         logger.error("Location update error: %s", exc)
         raise HTTPException(status_code=400, detail="No se pudo guardar la ubicacion aproximada.")
@@ -85,6 +91,8 @@ async def update_location(body: ApproximateLocationRequest, token: CurrentToken,
 async def complete_onboarding(body: OnboardingRequest, token: CurrentToken, _: CurrentUser):
     try:
         return await auth_service.complete_onboarding(token, body.model_dump(exclude_none=True))
+    except ExternalServiceError as exc:
+        raise HTTPException(status_code=503, detail=exc.message)
     except Exception as exc:
         logger.error("Onboarding error: %s", exc)
         raise HTTPException(status_code=400, detail="No se pudo guardar la configuracion.")
@@ -96,6 +104,8 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest):
     redirect_url = f"{request.base_url}reset-password"
     try:
         await auth_service.forgot_password(body.email, redirect_url)
+    except ExternalServiceError as exc:
+        raise HTTPException(status_code=503, detail=exc.message)
     except Exception as exc:
         logger.error("Forgot password error for %s: %s", body.email, exc)
     return MessageResponse(
@@ -108,6 +118,8 @@ async def reset_password(body: ResetPasswordRequest):
     try:
         await auth_service.reset_password(body.access_token, body.new_password)
         return MessageResponse(message="Contrasena actualizada correctamente.")
+    except ExternalServiceError as exc:
+        raise HTTPException(status_code=503, detail=exc.message)
     except Exception as exc:
         logger.error("Reset password error: %s", exc)
         raise HTTPException(status_code=400, detail="Token invalido o expirado.")

@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Starting %s [%s]", settings.APP_NAME, settings.APP_ENV)
     logger.info("Cache: %s", cache)
-    logger.info("Supabase: %s", "connected" if settings.supabase_configured else "mock mode")
+    logger.info("Supabase: %s", "connected" if settings.supabase_configured else "not configured")
     logger.info("Google Places: %s", "enabled" if settings.google_places_configured else "disabled")
     yield
     await cache.close()

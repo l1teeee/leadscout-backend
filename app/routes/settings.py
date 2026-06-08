@@ -18,7 +18,7 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 @router.get("/workspace", response_model=WorkspaceSettings)
 async def get_workspace(workspace_id: CurrentWorkspace):
     try:
-        return settings_service.get_workspace(workspace_id)
+        return await settings_service.get_workspace(workspace_id)
     except WorkspaceNotFoundError:
         raise HTTPException(status_code=404, detail="Workspace no encontrado.")
 
@@ -28,7 +28,7 @@ async def update_workspace(body: WorkspaceUpdate, workspace_id: CurrentWorkspace
     if not body.model_dump(exclude_none=True):
         raise HTTPException(status_code=422, detail="No hay campos para actualizar.")
     try:
-        return settings_service.update_workspace(workspace_id, body)
+        return await settings_service.update_workspace(workspace_id, body)
     except WorkspaceNotFoundError:
         raise HTTPException(status_code=404, detail="Workspace no encontrado.")
 
@@ -50,9 +50,9 @@ async def update_profile(body: UserProfileUpdate, token: CurrentToken, _: Curren
 
 @router.get("/team", response_model=TeamSettings)
 async def get_team(workspace_id: CurrentWorkspace):
-    return settings_service.get_team(workspace_id)
+    return await settings_service.get_team(workspace_id)
 
 
 @router.get("/usage", response_model=UsageSettings)
 async def get_usage(workspace_id: CurrentWorkspace):
-    return settings_service.get_usage(workspace_id)
+    return await settings_service.get_usage(workspace_id)

@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.services import supabase_service
+    supabase_service.initialize()
     logger.info("Starting %s [%s]", settings.APP_NAME, settings.APP_ENV)
     logger.info("Cache: %s", cache)
     logger.info("Supabase: %s", "connected" if settings.supabase_configured else "not configured")

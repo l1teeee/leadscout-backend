@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import SecretStr, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -41,19 +42,33 @@ class Settings(BaseSettings):
     ORIGIN_GUARD_ENABLED: bool = False
 
     SUPABASE_URL: str = ""
-    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: SecretStr = SecretStr("")
 
     GOOGLE_PLACES_API_KEY: str = ""
     PAGESPEED_API_KEY: str = ""
 
     REDIS_URL: str = ""
 
-    SIGNING_SECRET: str = ""
+    SIGNING_SECRET: SecretStr = SecretStr("")
 
-    OPENAI_API_KEY: str = ""
+    OPENAI_API_KEY: SecretStr = SecretStr("")
     OPENAI_MODEL: str = "gpt-4o-mini"
 
     LOG_LEVEL: str = "info"
+
+    @model_validator(mode="after")
+    def _validate_production_secrets(self) -> "Settings":
+        if self.APP_ENV == "production":
+            missing = []
+            if not self.SUPABASE_SERVICE_ROLE_KEY.get_secret_value():
+                missing.append("SUPABASE_SERVICE_ROLE_KEY")
+            if not self.OPENAI_API_KEY.get_secret_value():
+                missing.append("OPENAI_API_KEY")
+            if not self.SIGNING_SECRET.get_secret_value():
+                missing.append("SIGNING_SECRET")
+            if missing:
+                raise ValueError(f"Required secrets missing in production: {', '.join(missing)}")
+        return self
 
     @property
     def allowed_origins_list(self) -> list[str]:
@@ -65,7 +80,7 @@ class Settings(BaseSettings):
 
     @property
     def supabase_configured(self) -> bool:
-        return bool(self.SUPABASE_URL and self.SUPABASE_SERVICE_ROLE_KEY)
+        return bool(self.SUPABASE_URL and self.SUPABASE_SERVICE_ROLE_KEY.get_secret_value())
 
     @property
     def google_places_configured(self) -> bool:
@@ -73,7 +88,7 @@ class Settings(BaseSettings):
 
     @property
     def openai_configured(self) -> bool:
-        return bool(self.OPENAI_API_KEY)
+        return bool(self.OPENAI_API_KEY.get_secret_value())
 
 
 settings = Settings()

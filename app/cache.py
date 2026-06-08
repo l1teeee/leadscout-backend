@@ -41,6 +41,7 @@ class _InMemoryCache:
         return value
 
     async def set(self, key: str, value: Any, ttl: int) -> None:
+        self._cleanup_expired()
         self._store[key] = (value, time.monotonic() + ttl)
 
     async def delete(self, key: str) -> None:
@@ -53,6 +54,14 @@ class _InMemoryCache:
 
     async def close(self) -> None:
         pass
+
+    def _cleanup_expired(self) -> None:
+        if len(self._store) < 1000:
+            return
+        now = time.monotonic()
+        expired = [k for k, (_, expiry) in self._store.items() if now > expiry]
+        for k in expired:
+            del self._store[k]
 
     def __repr__(self) -> str:
         return "InMemoryCache"
@@ -81,7 +90,17 @@ class _RedisCache:
         await self._client.delete(key)
 
     async def invalidate_prefix(self, prefix: str) -> None:
-        keys = await self._client.keys(f"{prefix}*")
+        cursor = 0
+        keys = []
+        while True:
+            cursor, batch = await self._client.scan(
+                cursor=cursor,
+                match=f"{prefix}*",
+                count=100,
+            )
+            keys.extend(batch)
+            if cursor == 0:
+                break
         if keys:
             await self._client.delete(*keys)
 

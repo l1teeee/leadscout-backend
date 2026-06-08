@@ -1,5 +1,6 @@
 import logging
 
+from app.async_utils import run_sync
 from app.exceptions import ProfileUpdateError, WorkspaceNotFoundError
 from app.repositories import leads_repository, workspaces_repository
 from app.schemas.auth_schema import AuthUser
@@ -8,16 +9,16 @@ from app.schemas.settings_schema import TeamSettings, UsageSettings, UserProfile
 logger = logging.getLogger(__name__)
 
 
-def get_workspace(workspace_id: str) -> dict:
-    workspace = workspaces_repository.get_workspace(workspace_id)
+async def get_workspace(workspace_id: str) -> dict:
+    workspace = await run_sync(workspaces_repository.get_workspace, workspace_id)
     if not workspace:
         raise WorkspaceNotFoundError(workspace_id)
     return workspace
 
 
-def update_workspace(workspace_id: str, data: WorkspaceUpdate) -> dict:
+async def update_workspace(workspace_id: str, data: WorkspaceUpdate) -> dict:
     payload = data.model_dump(exclude_none=True)
-    workspace = workspaces_repository.update_workspace(workspace_id, payload)
+    workspace = await run_sync(workspaces_repository.update_workspace, workspace_id, payload)
     if not workspace:
         raise WorkspaceNotFoundError(workspace_id)
     return workspace
@@ -33,13 +34,13 @@ async def update_profile(token: str, data: UserProfileUpdate) -> AuthUser:
         raise ProfileUpdateError("No se pudo actualizar el perfil.") from exc
 
 
-def get_team(workspace_id: str) -> TeamSettings:
-    members = workspaces_repository.get_team_members(workspace_id)
+async def get_team(workspace_id: str) -> TeamSettings:
+    members = await run_sync(workspaces_repository.get_team_members, workspace_id)
     return TeamSettings(members=members)
 
 
-def get_usage(workspace_id: str) -> UsageSettings:
-    leads_data = leads_repository.list_leads(workspace_id, limit=1, offset=0)
+async def get_usage(workspace_id: str) -> UsageSettings:
+    leads_data = await run_sync(leads_repository.list_leads, workspace_id, limit=1, offset=0)
     return UsageSettings(
         leads_used=leads_data.get("total", 0),
         leads_limit=500,

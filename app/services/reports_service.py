@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
+from app.async_utils import run_sync
 from app.cache import TTL_REPORTS, cache
 from app.repositories import leads_repository
 
@@ -24,7 +25,7 @@ async def invalidate(workspace_id: str) -> None:
 
 
 async def _compute_summary(workspace_id: str) -> dict:
-    leads = leads_repository.list_all(workspace_id)
+    leads = await run_sync(leads_repository.list_all, workspace_id)
     total = len(leads)
     avg_score = round(sum(r["score"] for r in leads) / total) if total else 0
 

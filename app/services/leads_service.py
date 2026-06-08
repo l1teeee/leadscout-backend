@@ -1,5 +1,6 @@
 import logging
 
+from app.async_utils import run_sync
 from app.exceptions import LeadNotFoundError
 from app.repositories import leads_repository
 from app.schemas.common import PaginationParams
@@ -14,7 +15,8 @@ async def _invalidate_reports(workspace_id: str) -> None:
 
 
 async def list_leads(workspace_id: str, filters: LeadFilters, pagination: PaginationParams) -> dict:
-    return leads_repository.list_leads(
+    return await run_sync(
+        leads_repository.list_leads,
         workspace_id=workspace_id,
         q=filters.q,
         status=filters.status.value if filters.status else None,
@@ -30,7 +32,7 @@ async def list_leads(workspace_id: str, filters: LeadFilters, pagination: Pagina
 
 
 async def get_lead(workspace_id: str, lead_id: str) -> dict:
-    lead = leads_repository.get_lead(lead_id, workspace_id=workspace_id)
+    lead = await run_sync(leads_repository.get_lead, lead_id, workspace_id=workspace_id)
     if not lead:
         raise LeadNotFoundError(lead_id)
     return lead
@@ -39,14 +41,14 @@ async def get_lead(workspace_id: str, lead_id: str) -> dict:
 async def create_lead(workspace_id: str, data: LeadCreate) -> dict:
     payload = data.model_dump(mode="json")
     logger.info("Creating lead '%s' in workspace %s", data.name, workspace_id)
-    result = leads_repository.create_lead(workspace_id, payload)
+    result = await run_sync(leads_repository.create_lead, workspace_id, payload)
     await _invalidate_reports(workspace_id)
     return result
 
 
 async def update_lead(workspace_id: str, lead_id: str, data: LeadUpdate) -> dict:
     payload = data.model_dump(mode="json", exclude_none=True)
-    updated = leads_repository.update_lead(lead_id, payload, workspace_id=workspace_id)
+    updated = await run_sync(leads_repository.update_lead, lead_id, payload, workspace_id=workspace_id)
     if not updated:
         raise LeadNotFoundError(lead_id)
     await _invalidate_reports(workspace_id)
@@ -54,7 +56,8 @@ async def update_lead(workspace_id: str, lead_id: str, data: LeadUpdate) -> dict
 
 
 async def delete_lead(workspace_id: str, lead_id: str) -> None:
-    if not leads_repository.delete_lead(lead_id, workspace_id=workspace_id):
+    deleted = await run_sync(leads_repository.delete_lead, lead_id, workspace_id=workspace_id)
+    if not deleted:
         raise LeadNotFoundError(lead_id)
     await _invalidate_reports(workspace_id)
     logger.info("Deleted lead %s", lead_id)

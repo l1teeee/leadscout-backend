@@ -1,7 +1,9 @@
 import pytest
+from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 
 from app.main import app
+from tests.conftest import MOCK_LEAD
 
 client = TestClient(app)
 
@@ -28,7 +30,7 @@ def test_list_leads_returns_paginated_shape():
 def test_list_leads_default_limit():
     response = client.get("/api/leads")
     data = response.json()
-    assert data["limit"] == 50
+    assert data["limit"] == 100
     assert data["offset"] == 0
 
 
@@ -127,8 +129,7 @@ def test_create_lead_empty_name():
     assert response.status_code == 422
 
 
-def test_update_lead():
-    # Create first
+def test_update_lead(mock_supabase):
     create_resp = client.post("/api/leads", json={
         "name": "Lead Para Actualizar",
         "category": "Retail",
@@ -136,7 +137,9 @@ def test_update_lead():
     assert create_resp.status_code == 201
     lead_id = create_resp.json()["id"]
 
-    # Update
+    updated_lead = {**MOCK_LEAD, "id": lead_id, "status": "contactado"}
+    mock_supabase.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[updated_lead])
+
     update_resp = client.patch(f"/api/leads/{lead_id}", json={"status": "contactado"})
     assert update_resp.status_code == 200
     assert update_resp.json()["status"] == "contactado"
@@ -147,9 +150,12 @@ def test_update_lead_not_found():
     assert response.status_code == 404
 
 
-def test_delete_lead():
+def test_delete_lead(mock_supabase):
     create_resp = client.post("/api/leads", json={"name": "Lead A Eliminar", "category": "Test"})
+    assert create_resp.status_code == 201
     lead_id = create_resp.json()["id"]
+
+    mock_supabase.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"id": lead_id}])
 
     delete_resp = client.delete(f"/api/leads/{lead_id}")
     assert delete_resp.status_code == 204

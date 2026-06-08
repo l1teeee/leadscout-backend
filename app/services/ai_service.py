@@ -7,6 +7,7 @@ import httpx
 from app.cache import cache
 from app.config import settings
 from app.exceptions import ExternalServiceError
+from app.services import social_scraper_service
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,22 @@ _TIMEOUT = 30.0
 _BRAND_CLASSIFICATION_TTL = 7 * 24 * 60 * 60
 _OPENAI_READY_CACHE_KEY = "ai:openai-ready"
 _OPENAI_READY_TTL = 5 * 60
+
+_http: httpx.AsyncClient | None = None
+
+
+def _get_http() -> httpx.AsyncClient:
+    global _http
+    if _http is None:
+        _http = httpx.AsyncClient(
+            timeout=_TIMEOUT,
+            limits=httpx.Limits(
+                max_connections=5,
+                max_keepalive_connections=3,
+                keepalive_expiry=30.0,
+            ),
+        )
+    return _http
 
 
 def _brand_classification_key(place: dict) -> str:
@@ -29,6 +46,15 @@ def _build_prompt(lead: dict) -> str:
     issues = ", ".join(lead.get("issues", [])) or "Ninguna detectada"
     phone = lead.get("phone") or "No tiene"
     website = lead.get("website") or "No tiene"
+    social_scrape = lead.get("social_scrape") or {}
+    social_profiles = social_scrape.get("profiles") or []
+    social_status = social_scrape.get("status") or "not_checked"
+    social_reason = social_scrape.get("reason") or ""
+    social_lines = (
+        "\n".join(f"- {profile.get('platform')}: {profile.get('url')}" for profile in social_profiles)
+        if social_profiles
+        else "No se detectaron perfiles sociales en el scraping del sitio web."
+    )
     return f"""Eres un experto en marketing digital y ventas B2B para pequeñas empresas en Latinoamérica.
 
 Analiza este negocio y da recomendaciones específicas y accionables:
@@ -40,6 +66,14 @@ Teléfono: {phone}
 Sitio web: {website}
 Score digital: {lead.get("score", 0)}/100
 Brechas detectadas: {issues}
+Estado del scraping de redes sociales: {social_status} ({social_reason})
+Redes sociales detectadas:
+{social_lines}
+
+Reglas importantes:
+- Si hay redes sociales detectadas, NO recomiendes crear redes sociales desde cero. Recomienda optimizar, auditar o activar mejor esos perfiles.
+- Si el scraping falló o no se pudo revisar, no afirmes que no tiene redes. Indica que se debe validar manualmente antes de proponer creación de perfiles.
+- Si no se detectan redes después de un scraping exitoso, puedes recomendar crear o completar perfiles sociales, pero aclara que la evidencia revisada fue el sitio web disponible.
 
 Responde en este formato exacto (sin markdown extra, sin asteriscos):
 
@@ -55,29 +89,34 @@ ESTRATEGIA DE PRIMER CONTACTO
 [Cómo abordar este lead en 2-3 oraciones]"""
 
 
+async def enrich_lead_for_analysis(lead: dict) -> dict:
+    social_scrape = await social_scraper_service.detect_social_profiles(lead.get("website"))
+    return {**lead, "social_scrape": social_scrape}
+
+
 async def analyze_lead(lead: dict) -> str:
     if not settings.openai_configured:
         raise ValueError("OPENAI_API_KEY no está configurado en .env")
 
-    prompt = _build_prompt(lead)
+    enriched_lead = await enrich_lead_for_analysis(lead)
+    prompt = _build_prompt(enriched_lead)
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.post(
-            _OPENAI_URL,
-            json={
-                "model": settings.OPENAI_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 600,
-                "temperature": 0.6,
-            },
-            headers={
-                "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
+    resp = await _get_http().post(
+        _OPENAI_URL,
+        json={
+            "model": settings.OPENAI_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 600,
+            "temperature": 0.6,
+        },
+        headers={
+            "Authorization": f"Bearer {settings.OPENAI_API_KEY.get_secret_value()}",
+            "Content-Type": "application/json",
+        },
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"].strip()
 
 
 def _brand_classification_messages(place: dict) -> list[dict[str, str]]:
@@ -188,36 +227,35 @@ async def validate_openai_ready() -> None:
     if await cache.get(_OPENAI_READY_CACHE_KEY):
         return
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            resp = await client.post(
-                _OPENAI_URL,
-                json={
-                    "model": settings.OPENAI_MODEL,
-                    "messages": [{"role": "user", "content": "Reply with OK."}],
-                    "max_tokens": 5,
-                    "temperature": 0,
-                },
-                headers={
-                    "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-            )
-            resp.raise_for_status()
-            await cache.set(_OPENAI_READY_CACHE_KEY, True, ttl=_OPENAI_READY_TTL)
-        except httpx.HTTPStatusError as exc:
-            logger.warning(
-                "OpenAI readiness check failed: status=%s detail=%s",
-                exc.response.status_code,
-                _openai_response_detail(exc.response),
-            )
-            raise ExternalServiceError("OpenAI", _openai_status_message(exc.response)) from exc
-        except httpx.HTTPError as exc:
-            logger.warning("OpenAI readiness check failed: %s", exc)
-            raise ExternalServiceError(
-                "OpenAI",
-                "Could not reach OpenAI to validate local businesses. Check network or API availability.",
-            ) from exc
+    try:
+        resp = await _get_http().post(
+            _OPENAI_URL,
+            json={
+                "model": settings.OPENAI_MODEL,
+                "messages": [{"role": "user", "content": "Reply with OK."}],
+                "max_tokens": 5,
+                "temperature": 0,
+            },
+            headers={
+                "Authorization": f"Bearer {settings.OPENAI_API_KEY.get_secret_value()}",
+                "Content-Type": "application/json",
+            },
+        )
+        resp.raise_for_status()
+        await cache.set(_OPENAI_READY_CACHE_KEY, True, ttl=_OPENAI_READY_TTL)
+    except httpx.HTTPStatusError as exc:
+        logger.warning(
+            "OpenAI readiness check failed: status=%s detail=%s",
+            exc.response.status_code,
+            _openai_response_detail(exc.response),
+        )
+        raise ExternalServiceError("OpenAI", _openai_status_message(exc.response)) from exc
+    except httpx.HTTPError as exc:
+        logger.warning("OpenAI readiness check failed: %s", exc)
+        raise ExternalServiceError(
+            "OpenAI",
+            "Could not reach OpenAI to validate local businesses. Check network or API availability.",
+        ) from exc
 
 
 async def classify_local_business_candidate(place: dict) -> dict:
@@ -228,44 +266,43 @@ async def classify_local_business_candidate(place: dict) -> dict:
     if cached is not None:
         return cached
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        try:
-            resp = await client.post(
-                _OPENAI_URL,
-                json={
-                    "model": settings.OPENAI_MODEL,
-                    "messages": _brand_classification_messages(place),
-                    "max_tokens": 180,
-                    "temperature": 0,
-                    "response_format": {"type": "json_object"},
-                },
-                headers={
-                    "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"].strip()
-            result = _parse_brand_classification(content)
-            await cache.set(key, result, ttl=_BRAND_CLASSIFICATION_TTL)
-            return result
-        except httpx.HTTPStatusError as exc:
-            logger.warning(
-                "OpenAI brand classification failed: status=%s detail=%s",
-                exc.response.status_code,
-                _openai_response_detail(exc.response),
-            )
-            raise ExternalServiceError("OpenAI", _openai_status_message(exc.response)) from exc
-        except httpx.HTTPError as exc:
-            logger.warning("OpenAI brand classification failed: %s", exc)
-            raise ExternalServiceError(
-                "OpenAI",
-                "Could not reach OpenAI to validate whether a business is local.",
-            ) from exc
-        except (KeyError, json.JSONDecodeError) as exc:
-            logger.warning("OpenAI brand classification returned invalid data: %s", exc)
-            raise ExternalServiceError(
-                "OpenAI",
-                "OpenAI returned an invalid validation response. Check OPENAI_MODEL in the backend .env.",
-            ) from exc
+    try:
+        resp = await _get_http().post(
+            _OPENAI_URL,
+            json={
+                "model": settings.OPENAI_MODEL,
+                "messages": _brand_classification_messages(place),
+                "max_tokens": 180,
+                "temperature": 0,
+                "response_format": {"type": "json_object"},
+            },
+            headers={
+                "Authorization": f"Bearer {settings.OPENAI_API_KEY.get_secret_value()}",
+                "Content-Type": "application/json",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"].strip()
+        result = _parse_brand_classification(content)
+        await cache.set(key, result, ttl=_BRAND_CLASSIFICATION_TTL)
+        return result
+    except httpx.HTTPStatusError as exc:
+        logger.warning(
+            "OpenAI brand classification failed: status=%s detail=%s",
+            exc.response.status_code,
+            _openai_response_detail(exc.response),
+        )
+        raise ExternalServiceError("OpenAI", _openai_status_message(exc.response)) from exc
+    except httpx.HTTPError as exc:
+        logger.warning("OpenAI brand classification failed: %s", exc)
+        raise ExternalServiceError(
+            "OpenAI",
+            "Could not reach OpenAI to validate whether a business is local.",
+        ) from exc
+    except (KeyError, json.JSONDecodeError) as exc:
+        logger.warning("OpenAI brand classification returned invalid data: %s", exc)
+        raise ExternalServiceError(
+            "OpenAI",
+            "OpenAI returned an invalid validation response. Check OPENAI_MODEL in the backend .env.",
+        ) from exc

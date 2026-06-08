@@ -1,6 +1,7 @@
 import logging
 from datetime import UTC, datetime
 
+from app.async_utils import run_sync
 from app.cache import TTL_AUTH_TOKEN, cache
 from app.exceptions import ExternalServiceError
 from app.schemas.auth_schema import AuthResponse, AuthUser
@@ -25,9 +26,9 @@ def _token_cache_key(token: str) -> str:
     return f"auth:user:{hashlib.sha256(token.encode()).hexdigest()[:32]}"
 
 
-def _profile_for_user(client, user_id: str) -> dict:
+async def _profile_for_user(client, user_id: str) -> dict:
     try:
-        result = (
+        result = await run_sync(lambda: (
             client.table("profiles")
             .select(
                 "workspace_id, full_name, role, approximate_latitude, "
@@ -36,36 +37,24 @@ def _profile_for_user(client, user_id: str) -> dict:
             .eq("id", user_id)
             .maybe_single()
             .execute()
-        )
-        if result is None:
-            return {}
-        return result.data or {}
+        ))
+        return result.data or {} if result else {}
     except Exception:
-        try:
-            result = (
-                client.table("profiles")
-                .select("workspace_id, full_name, role")
-                .eq("id", user_id)
-                .maybe_single()
-                .execute()
-            )
-            return result.data if result is not None and result.data else {}
-        except Exception:
-            logger.exception("Could not resolve profile for user %s", user_id)
-            return {}
+        logger.exception("Could not resolve profile for user %s", user_id)
+        return {}
 
 
-def _workspace_for_id(client, workspace_id: str | None) -> dict:
+async def _workspace_for_id(client, workspace_id: str | None) -> dict:
     if not workspace_id:
         return {}
     try:
-        result = (
+        result = await run_sync(lambda: (
             client.table("workspaces")
             .select("name, industry, country, city")
             .eq("id", workspace_id)
             .maybe_single()
             .execute()
-        )
+        ))
         if result is None:
             return {}
         return result.data or {}
@@ -127,11 +116,11 @@ def _sign(user: AuthUser) -> AuthUser:
 async def login(email: str, password: str) -> AuthResponse:
     client = _db_required()
 
-    response = client.auth.sign_in_with_password({"email": email, "password": password})
+    response = await run_sync(lambda: client.auth.sign_in_with_password({"email": email, "password": password}))
     meta = response.user.user_metadata or {}
     user_id = str(response.user.id)
-    profile = _profile_for_user(client, user_id)
-    workspace = _workspace_for_id(client, meta.get("workspace_id") or profile.get("workspace_id"))
+    profile = await _profile_for_user(client, user_id)
+    workspace = await _workspace_for_id(client, meta.get("workspace_id") or profile.get("workspace_id"))
     user = _user_from_sources(user_id, response.user.email or email, meta, profile, workspace)
     await cache.set(_token_cache_key(response.session.access_token), user.model_dump(), ttl=TTL_AUTH_TOKEN)
     return AuthResponse(access_token=response.session.access_token, user=_sign(user))
@@ -144,7 +133,7 @@ async def register(email: str, password: str, full_name: str | None = None) -> N
     if full_name:
         options["data"] = {"full_name": full_name}
 
-    client.auth.sign_up({"email": email, "password": password, "options": options})
+    await run_sync(lambda: client.auth.sign_up({"email": email, "password": password, "options": options}))
 
 
 async def logout(token: str) -> None:
@@ -153,7 +142,7 @@ async def logout(token: str) -> None:
     if not client:
         return
     try:
-        client.auth.admin.sign_out(token)
+        await run_sync(lambda: client.auth.admin.sign_out(token))
     except Exception:
         pass  # Best-effort: token may already be expired
 
@@ -170,11 +159,11 @@ async def get_user(token: str) -> AuthUser | None:
         return None
 
     try:
-        response = client.auth.get_user(token)
+        response = await run_sync(lambda: client.auth.get_user(token))
         meta = response.user.user_metadata or {}
         user_id = str(response.user.id)
-        profile = _profile_for_user(client, user_id)
-        workspace = _workspace_for_id(client, meta.get("workspace_id") or profile.get("workspace_id"))
+        profile = await _profile_for_user(client, user_id)
+        workspace = await _workspace_for_id(client, meta.get("workspace_id") or profile.get("workspace_id"))
         user = _user_from_sources(user_id, response.user.email or "", meta, profile, workspace)
         await cache.set(key, user.model_dump(), ttl=TTL_AUTH_TOKEN)
         return _sign(user)
@@ -184,7 +173,7 @@ async def get_user(token: str) -> AuthUser | None:
 
 async def forgot_password(email: str, redirect_url: str) -> None:
     client = _db_required()
-    client.auth.reset_password_for_email(email, {"redirect_to": redirect_url})
+    await run_sync(lambda: client.auth.reset_password_for_email(email, {"redirect_to": redirect_url}))
 
 
 def _slugify(text: str) -> str:
@@ -198,11 +187,11 @@ def _slugify(text: str) -> str:
 async def complete_onboarding(token: str, data: dict) -> AuthUser:
     client = _db_required()
 
-    user_response = client.auth.get_user(token)
+    user_response = await run_sync(lambda: client.auth.get_user(token))
     user_id = str(user_response.user.id)
     email = user_response.user.email or ""
     existing_meta = user_response.user.user_metadata or {}
-    existing_profile = _profile_for_user(client, user_id)
+    existing_profile = await _profile_for_user(client, user_id)
 
     workspace_name = data.get("workspace_name") or "Mi Workspace"
     slug = f"{_slugify(workspace_name)}-{user_id[:8]}"
@@ -218,21 +207,21 @@ async def complete_onboarding(token: str, data: dict) -> AuthUser:
 
     workspace_id = existing_meta.get("workspace_id") or existing_profile.get("workspace_id")
     if workspace_id:
-        client.table("workspaces").update(workspace_payload).eq("id", workspace_id).execute()
+        await run_sync(lambda: client.table("workspaces").update(workspace_payload).eq("id", workspace_id).execute())
     else:
         try:
-            ws_result = client.table("workspaces").insert(workspace_payload).execute()
+            ws_result = await run_sync(lambda: client.table("workspaces").insert(workspace_payload).execute())
             workspace_id = ws_result.data[0]["id"]
         except Exception:
             # If a previous attempt created the workspace but failed before profile insert,
             # recover it by slug instead of crashing on the unique constraint.
-            ws_result = (
+            ws_result = await run_sync(lambda: (
                 client.table("workspaces")
                 .select("id")
                 .eq("slug", slug)
                 .maybe_single()
                 .execute()
-            )
+            ))
             if ws_result is None or not ws_result.data:
                 raise
             workspace_id = ws_result.data["id"]
@@ -244,7 +233,7 @@ async def complete_onboarding(token: str, data: dict) -> AuthUser:
         "full_name": data.get("full_name"),
         "role": "owner",
     }
-    client.table("profiles").upsert(profile_payload, on_conflict="id").execute()
+    await run_sync(lambda: client.table("profiles").upsert(profile_payload, on_conflict="id").execute())
 
     updated_meta = {
         **existing_meta,
@@ -257,7 +246,7 @@ async def complete_onboarding(token: str, data: dict) -> AuthUser:
         "country": data.get("country"),
         "city": data.get("city"),
     }
-    client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_meta})
+    await run_sync(lambda: client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_meta}))
 
     await cache.delete(_token_cache_key(token))
 
@@ -267,12 +256,12 @@ async def complete_onboarding(token: str, data: dict) -> AuthUser:
 async def update_approximate_location(token: str, latitude: float, longitude: float, label: str | None) -> AuthUser:
     client = _db_required()
 
-    user_response = client.auth.get_user(token)
+    user_response = await run_sync(lambda: client.auth.get_user(token))
     user_id = str(user_response.user.id)
     email = user_response.user.email or ""
     meta = user_response.user.user_metadata or {}
-    profile = _profile_for_user(client, user_id)
-    workspace = _workspace_for_id(client, meta.get("workspace_id") or profile.get("workspace_id"))
+    profile = await _profile_for_user(client, user_id)
+    workspace = await _workspace_for_id(client, meta.get("workspace_id") or profile.get("workspace_id"))
 
     rounded_lat = _round_approx(latitude)
     rounded_lng = _round_approx(longitude)
@@ -283,16 +272,16 @@ async def update_approximate_location(token: str, latitude: float, longitude: fl
     }
 
     try:
-        client.table("profiles").update({
+        await run_sync(lambda: client.table("profiles").update({
             **location_meta,
             "location_updated_at": datetime.now(UTC).isoformat(),
-        }).eq("id", user_id).execute()
+        }).eq("id", user_id).execute())
         profile = {**profile, **location_meta}
     except Exception:
         logger.exception("Could not persist approximate location in profiles for user %s", user_id)
 
     try:
-        client.auth.admin.update_user_by_id(user_id, {"user_metadata": {**meta, **location_meta}})
+        await run_sync(lambda: client.auth.admin.update_user_by_id(user_id, {"user_metadata": {**meta, **location_meta}}))
     except Exception:
         logger.exception("Could not persist approximate location metadata for user %s", user_id)
 
@@ -303,7 +292,7 @@ async def update_approximate_location(token: str, latitude: float, longitude: fl
 async def update_profile(token: str, data: dict) -> AuthUser:
     client = _db_required()
 
-    user_response = client.auth.get_user(token)
+    user_response = await run_sync(lambda: client.auth.get_user(token))
     user_id = str(user_response.user.id)
     email = user_response.user.email or ""
     meta = user_response.user.user_metadata or {}
@@ -311,20 +300,20 @@ async def update_profile(token: str, data: dict) -> AuthUser:
     profile_update = {k: v for k, v in data.items() if k in ("full_name", "role")}
     if profile_update:
         try:
-            client.table("profiles").update(profile_update).eq("id", user_id).execute()
+            await run_sync(lambda: client.table("profiles").update(profile_update).eq("id", user_id).execute())
         except Exception:
             logger.exception("Could not update profile for user %s", user_id)
 
     updated_meta = {**meta, **{k: v for k, v in data.items() if k in ("full_name", "role")}}
     if updated_meta != meta:
         try:
-            client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_meta})
+            await run_sync(lambda: client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_meta}))
         except Exception:
             logger.exception("Could not update user_metadata for user %s", user_id)
 
     await cache.delete(_token_cache_key(token))
-    profile = _profile_for_user(client, user_id)
-    workspace = _workspace_for_id(client, updated_meta.get("workspace_id") or profile.get("workspace_id"))
+    profile = await _profile_for_user(client, user_id)
+    workspace = await _workspace_for_id(client, updated_meta.get("workspace_id") or profile.get("workspace_id"))
     return _sign(_user_from_sources(user_id, email, updated_meta, profile, workspace))
 
 
@@ -332,8 +321,8 @@ async def reset_password(access_token: str, new_password: str) -> None:
     await cache.delete(_token_cache_key(access_token))
     client = _db_required()
 
-    user_response = client.auth.get_user(access_token)
-    client.auth.admin.update_user_by_id(
+    user_response = await run_sync(lambda: client.auth.get_user(access_token))
+    await run_sync(lambda: client.auth.admin.update_user_by_id(
         str(user_response.user.id),
         {"password": new_password},
-    )
+    ))

@@ -48,7 +48,13 @@ def list_leads(
 def list_all(workspace_id: str) -> list[dict]:
     """Used internally for aggregations - no pagination."""
     db = _db_required()
-    return db.table("leads").select("*").eq("workspace_id", workspace_id).execute().data
+    return (
+        db.table("leads")
+        .select("score,priority,status,category,created_at")
+        .eq("workspace_id", workspace_id)
+        .execute()
+        .data
+    )
 
 
 def get_lead(lead_id: str, workspace_id: str | None = None) -> dict | None:
@@ -82,8 +88,8 @@ def delete_lead(lead_id: str, workspace_id: str | None = None) -> bool:
     query = db.table("leads").delete().eq("id", lead_id)
     if workspace_id:
         query = query.eq("workspace_id", workspace_id)
-    query.execute()
-    return True
+    result = query.execute()
+    return bool(result.data)
 
 
 def find_by_place_id(google_place_id: str, workspace_id: str) -> dict | None:

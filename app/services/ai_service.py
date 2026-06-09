@@ -94,6 +94,50 @@ async def enrich_lead_for_analysis(lead: dict) -> dict:
     return {**lead, "social_scrape": social_scrape}
 
 
+async def ask_lead_question(lead: dict, question: str) -> str:
+    if not settings.openai_configured:
+        raise ValueError("OPENAI_API_KEY no está configurado en .env")
+
+    issues = ", ".join(lead.get("issues", [])) or "Ninguna detectada"
+    phone = lead.get("phone") or "No tiene"
+    website = lead.get("website") or "No tiene"
+    existing_analysis = lead.get("analysis") or ""
+
+    system_prompt = (
+        "Eres un asistente experto en ventas B2B y marketing digital para pequeñas empresas en Latinoamérica.\n\n"
+        f"El usuario está evaluando este lead:\n"
+        f"Nombre: {lead.get('name', 'N/A')}\n"
+        f"Categoría: {lead.get('category', 'N/A')}\n"
+        f"Ubicación: {lead.get('location', 'N/A')}\n"
+        f"Teléfono: {phone}\n"
+        f"Sitio web: {website}\n"
+        f"Score digital: {lead.get('score', 0)}/100\n"
+        f"Brechas detectadas: {issues}\n"
+        + (f"\nAnálisis previo:\n{existing_analysis}\n" if existing_analysis else "")
+        + "\nResponde de forma concreta y accionable. Máximo 120 palabras. Sin asteriscos ni markdown."
+    )
+
+    resp = await _get_http().post(
+        _OPENAI_URL,
+        json={
+            "model": settings.OPENAI_MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": question},
+            ],
+            "max_tokens": 250,
+            "temperature": 0.6,
+        },
+        headers={
+            "Authorization": f"Bearer {settings.OPENAI_API_KEY.get_secret_value()}",
+            "Content-Type": "application/json",
+        },
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"].strip()
+
+
 async def analyze_lead(lead: dict) -> str:
     if not settings.openai_configured:
         raise ValueError("OPENAI_API_KEY no está configurado en .env")

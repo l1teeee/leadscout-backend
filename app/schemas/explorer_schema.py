@@ -45,3 +45,20 @@ class LeadAnalyzeRequest(BaseModel):
 
 class LeadAnalyzeResponse(BaseModel):
     analysis: str
+
+
+class LeadChatRequest(BaseModel):
+    name: str = Field(..., max_length=300)
+    category: str = Field("", max_length=100)
+    location: str = Field("", max_length=300)
+    phone: str | None = None
+    website: str | None = None
+    score: int = Field(0, ge=0, le=100)
+    issues: list[str] = []
+    lead_id: str | None = None
+    analysis: str | None = None
+    question: str = Field(..., min_length=1, max_length=600)
+
+
+class LeadChatResponse(BaseModel):
+    answer: str

@@ -10,6 +10,8 @@ from app.schemas.explorer_schema import (
     ExplorerSearchResponse,
     LeadAnalyzeRequest,
     LeadAnalyzeResponse,
+    LeadChatRequest,
+    LeadChatResponse,
 )
 from app.services import ai_service, explorer_service
 
@@ -59,6 +61,23 @@ async def analyze(request: Request, body: LeadAnalyzeRequest, user: CurrentUser,
             await run_sync(leads_repository.update_lead, body.lead_id, {"ai_analysis": analysis}, workspace_id=workspace_id)
 
         return LeadAnalyzeResponse(analysis=analysis)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"OpenAI error: {exc}")
+
+
+@router.post("/chat", response_model=LeadChatResponse)
+@limiter.limit("30/minute")
+async def chat(request: Request, body: LeadChatRequest, user: CurrentUser, workspace_id: CurrentWorkspace):
+    try:
+        lead_context = body.model_dump(exclude={"question"})
+        if body.lead_id:
+            lead = await run_sync(leads_repository.get_lead, body.lead_id, workspace_id=workspace_id)
+            if lead:
+                lead_context = {**lead_context, **{k: v for k, v in lead.items() if v is not None}}
+        answer = await ai_service.ask_lead_question(lead_context, body.question)
+        return LeadChatResponse(answer=answer)
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:

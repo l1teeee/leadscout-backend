@@ -21,7 +21,7 @@ _DETAILS_FIELD_MASK = (
     "id,name,displayName,formattedAddress,location,nationalPhoneNumber,"
     "internationalPhoneNumber,websiteUri,rating,userRatingCount,businessStatus"
 )
-_TIMEOUT = 15.0
+_TIMEOUT = 30.0
 
 # Shared client — reuses TCP connections to places.googleapis.com so DNS is
 # resolved once per process instead of once per call. Limited to 10 connections.

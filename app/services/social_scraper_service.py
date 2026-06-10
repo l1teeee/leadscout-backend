@@ -7,7 +7,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 
-_TIMEOUT = 8.0
+_TIMEOUT = 15.0
 _MAX_HTML_BYTES = 500_000
 _USER_AGENT = "ScoutIA/1.0 (+https://scoutia.dev)"
 

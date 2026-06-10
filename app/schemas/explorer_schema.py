@@ -41,10 +41,12 @@ class LeadAnalyzeRequest(BaseModel):
     issues: list[str] = []
     lead_id: str | None = None
     force_refresh: bool = False
+    business_context: str | None = Field(None, max_length=2000)
 
 
 class LeadAnalyzeResponse(BaseModel):
     analysis: str
+    social_profiles: list[dict[str, str]] = Field(default_factory=list)
 
 
 class LeadChatRequest(BaseModel):
@@ -58,6 +60,7 @@ class LeadChatRequest(BaseModel):
     lead_id: str | None = None
     analysis: str | None = None
     question: str = Field(..., min_length=1, max_length=600)
+    business_context: str | None = Field(None, max_length=2000)
 
 
 class LeadChatResponse(BaseModel):

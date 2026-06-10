@@ -56,7 +56,7 @@ def test_analyze_calls_openai_when_no_cache(client, mock_supabase):
     updated = {**LEAD_BASE, "ai_analysis": "Nuevo analisis"}
     mock_supabase.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[updated])
 
-    with patch("app.services.ai_service.analyze_lead", return_value="Nuevo analisis") as mock_ai:
+    with patch("app.services.ai_service.analyze_lead_with_social", return_value={"analysis": "Nuevo analisis", "social_profiles": []}) as mock_ai:
         response = client.post("/api/explorer/analyze", json={
             "name": "Test Business",
             "category": "Servicios",
@@ -82,7 +82,7 @@ def test_analyze_force_refresh_ignores_cached_analysis(client, mock_supabase):
         data=[{**lead_with_analysis, "ai_analysis": "Analisis nuevo"}]
     )
 
-    with patch("app.services.ai_service.analyze_lead", return_value="Analisis nuevo") as mock_ai:
+    with patch("app.services.ai_service.analyze_lead_with_social", return_value={"analysis": "Analisis nuevo", "social_profiles": []}) as mock_ai:
         response = client.post("/api/explorer/analyze", json={
             "name": "Test Business",
             "category": "Servicios",

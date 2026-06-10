@@ -37,10 +37,6 @@ class Settings(BaseSettings):
     # Used by both CORSMiddleware and OriginGuardMiddleware.
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001"
 
-    # Enable strict origin enforcement (require Origin header, block curl/Postman).
-    # Keep False in development; set True in production.
-    ORIGIN_GUARD_ENABLED: bool = False
-
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_ROLE_KEY: SecretStr = SecretStr("")
 

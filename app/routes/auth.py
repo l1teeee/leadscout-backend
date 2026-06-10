@@ -114,7 +114,8 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest):
 
 
 @router.post("/reset-password", response_model=MessageResponse)
-async def reset_password(body: ResetPasswordRequest):
+@limiter.limit("5/minute", key_func=get_remote_address)
+async def reset_password(request: Request, body: ResetPasswordRequest):
     try:
         await auth_service.reset_password(body.access_token, body.new_password)
         return MessageResponse(message="Contrasena actualizada correctamente.")

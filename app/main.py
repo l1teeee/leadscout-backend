@@ -43,7 +43,15 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down %s", settings.APP_NAME)
 
 
-app = FastAPI(title=settings.APP_NAME, version="0.1.0", lifespan=lifespan)
+_is_prod = settings.APP_ENV == "production"
+app = FastAPI(
+    title=settings.APP_NAME,
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url=None if _is_prod else "/docs",
+    redoc_url=None if _is_prod else "/redoc",
+    openapi_url=None if _is_prod else "/openapi.json",
+)
 
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 app.state.limiter = limiter

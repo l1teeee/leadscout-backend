@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -34,7 +35,9 @@ def list_leads(
     if category:
         query = query.eq("category", category)
     if q:
-        query = query.or_(f"name.ilike.%{q}%,address.ilike.%{q}%")
+        safe_q = re.sub(r"[%,()\\*]", " ", q).strip()
+        if safe_q:
+            query = query.or_(f"name.ilike.%{safe_q}%,address.ilike.%{safe_q}%")
     if min_score is not None:
         query = query.gte("score", min_score)
     if max_score is not None:

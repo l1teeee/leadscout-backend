@@ -4,6 +4,7 @@ from app.dependencies import CurrentToken, CurrentUser, CurrentWorkspace
 from app.exceptions import ProfileUpdateError, WorkspaceNotFoundError
 from app.schemas.auth_schema import AuthUser
 from app.schemas.settings_schema import (
+    AuditSettings,
     TeamSettings,
     UsageSettings,
     UserProfileUpdate,
@@ -56,3 +57,8 @@ async def get_team(workspace_id: CurrentWorkspace):
 @router.get("/usage", response_model=UsageSettings)
 async def get_usage(workspace_id: CurrentWorkspace):
     return await settings_service.get_usage(workspace_id)
+
+
+@router.get("/audit", response_model=AuditSettings)
+async def get_audit(workspace_id: CurrentWorkspace):
+    return await settings_service.get_audit(workspace_id)

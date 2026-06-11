@@ -60,7 +60,7 @@ async def analyze(request: Request, body: LeadAnalyzeRequest, user: CurrentUser,
                 "google_place_id": lead.get("google_place_id"),
             }
 
-        result = await ai_service.analyze_lead_with_social(data)
+        result = await ai_service.analyze_lead_with_social(data, workspace_id=workspace_id, user_id=user.id)
         analysis = result["analysis"]
 
         if body.lead_id:
@@ -83,7 +83,7 @@ async def chat(request: Request, body: LeadChatRequest, user: CurrentUser, works
             lead = await run_sync(leads_repository.get_lead, body.lead_id, workspace_id=workspace_id)
             if lead:
                 lead_context = {**lead_context, **{k: v for k, v in lead.items() if v is not None}}
-        answer = await ai_service.ask_lead_question(lead_context, body.question)
+        answer = await ai_service.ask_lead_question(lead_context, body.question, workspace_id=workspace_id, user_id=user.id)
         return LeadChatResponse(answer=answer)
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc))

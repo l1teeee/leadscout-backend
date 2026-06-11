@@ -101,7 +101,41 @@ async def enrich_lead_for_analysis(lead: dict) -> dict:
     return {**lead, "social_scrape": social_scrape}
 
 
-async def ask_lead_question(lead: dict, question: str) -> str:
+def _log_token_usage(data: dict, kind: str, workspace_id: str | None, user_id: str | None) -> None:
+    """Best-effort: record token usage from an OpenAI response. Never raises."""
+    if not workspace_id:
+        return
+    try:
+        usage = data.get("usage") or {}
+        input_tokens = int(usage.get("prompt_tokens") or 0)
+        output_tokens = int(usage.get("completion_tokens") or 0)
+        if not input_tokens and not output_tokens:
+            return
+        import asyncio
+
+        from app.async_utils import run_sync
+        from app.repositories import ai_usage_repository
+
+        asyncio.create_task(
+            run_sync(
+                ai_usage_repository.log_usage,
+                workspace_id,
+                user_id,
+                kind,
+                input_tokens,
+                output_tokens,
+            )
+        )
+    except Exception:
+        logger.debug("Token usage logging skipped", exc_info=True)
+
+
+async def ask_lead_question(
+    lead: dict,
+    question: str,
+    workspace_id: str | None = None,
+    user_id: str | None = None,
+) -> str:
     if not settings.openai_configured:
         raise ValueError("OPENAI_API_KEY no está configurado en .env")
 
@@ -150,10 +184,15 @@ async def ask_lead_question(lead: dict, question: str) -> str:
     )
     resp.raise_for_status()
     data = resp.json()
+    _log_token_usage(data, "chat", workspace_id, user_id)
     return data["choices"][0]["message"]["content"].strip()
 
 
-async def analyze_lead_with_social(lead: dict) -> dict:
+async def analyze_lead_with_social(
+    lead: dict,
+    workspace_id: str | None = None,
+    user_id: str | None = None,
+) -> dict:
     if not settings.openai_configured:
         raise ValueError("OPENAI_API_KEY no está configurado en .env")
 
@@ -175,6 +214,7 @@ async def analyze_lead_with_social(lead: dict) -> dict:
     )
     resp.raise_for_status()
     data = resp.json()
+    _log_token_usage(data, "analyze", workspace_id, user_id)
     analysis = data["choices"][0]["message"]["content"].strip()
     social_profiles = (enriched.get("social_scrape") or {}).get("profiles") or []
     return {"analysis": analysis, "social_profiles": social_profiles}

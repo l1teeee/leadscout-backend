@@ -45,9 +45,20 @@ class TeamSettings(BaseModel):
 
 
 class UsageSettings(BaseModel):
-    leads_used: int
-    leads_limit: int
+    plan: str
     searches_used: int
     searches_limit: int
-    api_calls_used: int
-    api_calls_limit: int
+    tokens_used: int
+    tokens_limit: int
+
+
+class AuditEntry(BaseModel):
+    query: Optional[str] = None
+    location: Optional[str] = None
+    category: Optional[str] = None
+    results_count: int = 0
+    created_at: Optional[str] = None
+
+
+class AuditSettings(BaseModel):
+    entries: list[AuditEntry]

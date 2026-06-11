@@ -2,11 +2,29 @@ import logging
 
 from app.async_utils import run_sync
 from app.exceptions import ProfileUpdateError, WorkspaceNotFoundError
-from app.repositories import leads_repository, workspaces_repository
+from app.repositories import (
+    ai_usage_repository,
+    search_audit_repository,
+    workspaces_repository,
+)
 from app.schemas.auth_schema import AuthUser
-from app.schemas.settings_schema import TeamSettings, UsageSettings, UserProfileUpdate, WorkspaceUpdate
+from app.schemas.settings_schema import (
+    AuditEntry,
+    AuditSettings,
+    TeamSettings,
+    UsageSettings,
+    UserProfileUpdate,
+    WorkspaceUpdate,
+)
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_PLAN = "starter"
+PLAN_LIMITS: dict[str, dict[str, int]] = {
+    "starter": {"searches": 100, "tokens": 200_000},
+    "growth": {"searches": 500, "tokens": 1_000_000},
+    "agency": {"searches": 2000, "tokens": 5_000_000},
+}
 
 
 async def get_workspace(workspace_id: str) -> dict:
@@ -40,12 +58,30 @@ async def get_team(workspace_id: str) -> TeamSettings:
 
 
 async def get_usage(workspace_id: str) -> UsageSettings:
-    leads_data = await run_sync(leads_repository.list_leads, workspace_id, limit=1, offset=0)
+    workspace = await run_sync(workspaces_repository.get_workspace, workspace_id)
+    plan = (workspace or {}).get("plan") or DEFAULT_PLAN
+    limits = PLAN_LIMITS.get(plan, PLAN_LIMITS[DEFAULT_PLAN])
+    searches_used = await run_sync(search_audit_repository.count_searches_this_month, workspace_id)
+    tokens_used = await run_sync(ai_usage_repository.count_tokens_this_month, workspace_id)
     return UsageSettings(
-        leads_used=leads_data.get("total", 0),
-        leads_limit=500,
-        searches_used=0,
-        searches_limit=100,
-        api_calls_used=0,
-        api_calls_limit=1000,
+        plan=plan,
+        searches_used=searches_used,
+        searches_limit=limits["searches"],
+        tokens_used=tokens_used,
+        tokens_limit=limits["tokens"],
     )
+
+
+async def get_audit(workspace_id: str) -> AuditSettings:
+    rows = await run_sync(search_audit_repository.list_recent, workspace_id, 10)
+    entries = [
+        AuditEntry(
+            query=row.get("query"),
+            location=row.get("location"),
+            category=row.get("category"),
+            results_count=row.get("results_count") or 0,
+            created_at=str(row["created_at"]) if row.get("created_at") else None,
+        )
+        for row in rows
+    ]
+    return AuditSettings(entries=entries)

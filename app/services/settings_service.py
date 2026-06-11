@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 from app.async_utils import run_sync
 from app.exceptions import ProfileUpdateError, WorkspaceNotFoundError
@@ -9,6 +10,8 @@ from app.repositories import (
 )
 from app.schemas.auth_schema import AuthUser
 from app.schemas.settings_schema import (
+    AiContextSettings,
+    AiContextUpdate,
     AuditEntry,
     AuditSettings,
     TeamSettings,
@@ -69,6 +72,31 @@ async def get_usage(workspace_id: str) -> UsageSettings:
         searches_limit=limits["searches"],
         tokens_used=tokens_used,
         tokens_limit=limits["tokens"],
+    )
+
+
+async def get_ai_context(workspace_id: str) -> AiContextSettings:
+    workspace = await run_sync(workspaces_repository.get_workspace, workspace_id)
+    row = workspace or {}
+    return AiContextSettings(
+        business_context=row.get("ai_business_context") or "",
+        constraints=row.get("ai_constraints") or "",
+        updated_at=str(row["ai_context_updated_at"]) if row.get("ai_context_updated_at") else None,
+    )
+
+
+async def update_ai_context(workspace_id: str, data: AiContextUpdate) -> AiContextSettings:
+    payload: dict = {"ai_context_updated_at": datetime.now(timezone.utc).isoformat()}
+    if data.business_context is not None:
+        payload["ai_business_context"] = data.business_context
+    if data.constraints is not None:
+        payload["ai_constraints"] = data.constraints
+    workspace = await run_sync(workspaces_repository.update_workspace, workspace_id, payload)
+    row = workspace or {}
+    return AiContextSettings(
+        business_context=row.get("ai_business_context") or "",
+        constraints=row.get("ai_constraints") or "",
+        updated_at=str(row["ai_context_updated_at"]) if row.get("ai_context_updated_at") else None,
     )
 
 

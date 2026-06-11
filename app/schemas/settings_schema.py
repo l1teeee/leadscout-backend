@@ -62,3 +62,14 @@ class AuditEntry(BaseModel):
 
 class AuditSettings(BaseModel):
     entries: list[AuditEntry]
+
+
+class AiContextSettings(BaseModel):
+    business_context: str = ""
+    constraints: str = ""
+    updated_at: Optional[str] = None
+
+
+class AiContextUpdate(BaseModel):
+    business_context: Optional[str] = Field(None, max_length=1000)
+    constraints: Optional[str] = Field(None, max_length=800)

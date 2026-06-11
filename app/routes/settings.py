@@ -4,6 +4,8 @@ from app.dependencies import CurrentToken, CurrentUser, CurrentWorkspace
 from app.exceptions import ProfileUpdateError, WorkspaceNotFoundError
 from app.schemas.auth_schema import AuthUser
 from app.schemas.settings_schema import (
+    AiContextSettings,
+    AiContextUpdate,
     AuditSettings,
     TeamSettings,
     UsageSettings,
@@ -62,3 +64,15 @@ async def get_usage(workspace_id: CurrentWorkspace):
 @router.get("/audit", response_model=AuditSettings)
 async def get_audit(workspace_id: CurrentWorkspace, limit: int = Query(10, ge=1, le=100)):
     return await settings_service.get_audit(workspace_id, limit)
+
+
+@router.get("/ai-context", response_model=AiContextSettings)
+async def get_ai_context(workspace_id: CurrentWorkspace):
+    return await settings_service.get_ai_context(workspace_id)
+
+
+@router.patch("/ai-context", response_model=AiContextSettings)
+async def update_ai_context(body: AiContextUpdate, workspace_id: CurrentWorkspace):
+    if not body.model_dump(exclude_none=True):
+        raise HTTPException(status_code=422, detail="No hay campos para actualizar.")
+    return await settings_service.update_ai_context(workspace_id, body)

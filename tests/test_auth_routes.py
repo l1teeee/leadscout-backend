@@ -40,3 +40,19 @@ def test_me_returns_user(client):
     assert "id" in data
     assert "email" in data
     assert "workspace_id" in data
+
+
+def test_access_token_expires_in_7_days():
+    from datetime import UTC, datetime, timedelta
+    from app.security import create_access_token, decode_access_token
+
+    token = create_access_token("user-123", "test@example.com")
+    payload = decode_access_token(token)
+
+    assert payload is not None
+    assert payload["sub"] == "user-123"
+    assert payload["email"] == "test@example.com"
+    assert "jti" in payload
+
+    expected_exp = (datetime.now(UTC) + timedelta(days=7)).timestamp()
+    assert abs(payload["exp"] - expected_exp) < 5

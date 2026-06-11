@@ -6,6 +6,7 @@ dependencies = [
     "fastapi==0.136.3",
     "httpx==0.28.1",
     "pydantic-settings==2.14.1",
+    "pyjwt[cryptography]>=2.8.0",
     "python-dotenv==1.2.2",
     "redis==8.0.0",
     "slowapi==0.1.9",

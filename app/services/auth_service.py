@@ -5,6 +5,7 @@ from app.async_utils import run_sync
 from app.cache import TTL_AUTH_TOKEN, cache
 from app.exceptions import ExternalServiceError
 from app.schemas.auth_schema import AuthResponse, AuthUser
+from app.security import create_access_token, decode_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -122,8 +123,9 @@ async def login(email: str, password: str) -> AuthResponse:
     profile = await _profile_for_user(client, user_id)
     workspace = await _workspace_for_id(client, meta.get("workspace_id") or profile.get("workspace_id"))
     user = _user_from_sources(user_id, response.user.email or email, meta, profile, workspace)
-    await cache.set(_token_cache_key(response.session.access_token), user.model_dump(), ttl=TTL_AUTH_TOKEN)
-    return AuthResponse(access_token=response.session.access_token, user=_sign(user))
+    token = create_access_token(user_id, response.user.email or email)
+    await cache.set(_token_cache_key(token), user.model_dump(), ttl=TTL_AUTH_TOKEN)
+    return AuthResponse(access_token=token, user=_sign(user))
 
 
 async def register(email: str, password: str, full_name: str | None = None) -> None:
@@ -138,16 +140,22 @@ async def register(email: str, password: str, full_name: str | None = None) -> N
 
 async def logout(token: str) -> None:
     await cache.delete(_token_cache_key(token))
-    client = _db()
-    if not client:
-        return
-    try:
-        await run_sync(lambda: client.auth.admin.sign_out(token))
-    except Exception:
-        pass  # Best-effort: token may already be expired
+    payload = decode_access_token(token)
+    if payload and (jti := payload.get("jti")):
+        remaining = max(0, int(payload.get("exp", 0) - datetime.now(UTC).timestamp()))
+        if remaining > 0:
+            await cache.set(f"revoked:{jti}", True, ttl=remaining)
 
 
 async def get_user(token: str) -> AuthUser | None:
+    payload = decode_access_token(token)
+    if not payload:
+        return None
+
+    jti = payload.get("jti", "")
+    if jti and await cache.get(f"revoked:{jti}"):
+        return None
+
     key = _token_cache_key(token)
     cached = await cache.get(key)
     if cached is not None:
@@ -158,13 +166,13 @@ async def get_user(token: str) -> AuthUser | None:
     if not client:
         return None
 
+    user_id = payload["sub"]
+    email = payload.get("email", "")
+
     try:
-        response = await run_sync(lambda: client.auth.get_user(token))
-        meta = response.user.user_metadata or {}
-        user_id = str(response.user.id)
         profile = await _profile_for_user(client, user_id)
-        workspace = await _workspace_for_id(client, meta.get("workspace_id") or profile.get("workspace_id"))
-        user = _user_from_sources(user_id, response.user.email or "", meta, profile, workspace)
+        workspace = await _workspace_for_id(client, profile.get("workspace_id"))
+        user = _user_from_sources(user_id, email, {}, profile, workspace)
         await cache.set(key, user.model_dump(), ttl=TTL_AUTH_TOKEN)
         return _sign(user)
     except Exception:
@@ -187,10 +195,13 @@ def _slugify(text: str) -> str:
 async def complete_onboarding(token: str, data: dict) -> AuthUser:
     client = _db_required()
 
-    user_response = await run_sync(lambda: client.auth.get_user(token))
-    user_id = str(user_response.user.id)
-    email = user_response.user.email or ""
-    existing_meta = user_response.user.user_metadata or {}
+    payload = decode_access_token(token)
+    if not payload:
+        raise ValueError("Token invalido o expirado.")
+    user_id = payload["sub"]
+    email = payload.get("email", "")
+    admin_resp = await run_sync(lambda: client.auth.admin.get_user_by_id(user_id))
+    existing_meta = admin_resp.user.user_metadata or {}
     existing_profile = await _profile_for_user(client, user_id)
 
     workspace_name = data.get("workspace_name") or "Mi Workspace"
@@ -256,10 +267,13 @@ async def complete_onboarding(token: str, data: dict) -> AuthUser:
 async def update_approximate_location(token: str, latitude: float, longitude: float, label: str | None) -> AuthUser:
     client = _db_required()
 
-    user_response = await run_sync(lambda: client.auth.get_user(token))
-    user_id = str(user_response.user.id)
-    email = user_response.user.email or ""
-    meta = user_response.user.user_metadata or {}
+    payload = decode_access_token(token)
+    if not payload:
+        raise ValueError("Token invalido o expirado.")
+    user_id = payload["sub"]
+    email = payload.get("email", "")
+    admin_resp = await run_sync(lambda: client.auth.admin.get_user_by_id(user_id))
+    meta = admin_resp.user.user_metadata or {}
     profile = await _profile_for_user(client, user_id)
     workspace = await _workspace_for_id(client, meta.get("workspace_id") or profile.get("workspace_id"))
 
@@ -292,10 +306,13 @@ async def update_approximate_location(token: str, latitude: float, longitude: fl
 async def update_profile(token: str, data: dict) -> AuthUser:
     client = _db_required()
 
-    user_response = await run_sync(lambda: client.auth.get_user(token))
-    user_id = str(user_response.user.id)
-    email = user_response.user.email or ""
-    meta = user_response.user.user_metadata or {}
+    payload = decode_access_token(token)
+    if not payload:
+        raise ValueError("Token invalido o expirado.")
+    user_id = payload["sub"]
+    email = payload.get("email", "")
+    admin_resp = await run_sync(lambda: client.auth.admin.get_user_by_id(user_id))
+    meta = admin_resp.user.user_metadata or {}
 
     profile_update = {k: v for k, v in data.items() if k in ("full_name", "role")}
     if profile_update:

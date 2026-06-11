@@ -72,8 +72,8 @@ async def get_usage(workspace_id: str) -> UsageSettings:
     )
 
 
-async def get_audit(workspace_id: str) -> AuditSettings:
-    rows = await run_sync(search_audit_repository.list_recent, workspace_id, 10)
+async def get_audit(workspace_id: str, limit: int = 10) -> AuditSettings:
+    rows = await run_sync(search_audit_repository.list_recent, workspace_id, limit)
     entries = [
         AuditEntry(
             query=row.get("query"),

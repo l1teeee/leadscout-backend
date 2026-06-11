@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.dependencies import CurrentToken, CurrentUser, CurrentWorkspace
 from app.exceptions import ProfileUpdateError, WorkspaceNotFoundError
@@ -60,5 +60,5 @@ async def get_usage(workspace_id: CurrentWorkspace):
 
 
 @router.get("/audit", response_model=AuditSettings)
-async def get_audit(workspace_id: CurrentWorkspace):
-    return await settings_service.get_audit(workspace_id)
+async def get_audit(workspace_id: CurrentWorkspace, limit: int = Query(10, ge=1, le=100)):
+    return await settings_service.get_audit(workspace_id, limit)

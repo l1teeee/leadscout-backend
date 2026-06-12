@@ -85,3 +85,27 @@ class LeadChatRequest(BaseModel):
 
 class LeadChatResponse(BaseModel):
     answer: str
+
+
+class OutreachRequest(BaseModel):
+    name: str = Field(..., max_length=300)
+    category: str = Field("", max_length=100)
+    location: str = Field("", max_length=300)
+    phone: str | None = None
+    website: str | None = None
+    score: int = Field(0, ge=0, le=100)
+    issues: list[str] = []
+    platform: str = Field(..., max_length=50)
+    lead_id: str | None = None
+    social_profiles: list[dict] = Field(default_factory=list)
+    business_context: str | None = Field(None, max_length=2000)
+
+    @field_validator("name", "category", "location", "platform", "business_context", mode="before")
+    @classmethod
+    def sanitize_fields(cls, v: str | None) -> str | None:
+        return _strip_controls(v)
+
+
+class OutreachResponse(BaseModel):
+    message: str
+    platform: str

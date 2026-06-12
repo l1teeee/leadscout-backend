@@ -42,6 +42,7 @@ class LeadUpdate(BaseModel):
     last_contact: Optional[date] = None
     is_viewed: Optional[bool] = None
     ai_analysis: Optional[str] = None
+    social_profiles: Optional[list[dict]] = None
 
 
 class LeadResponse(BaseModel):
@@ -63,6 +64,7 @@ class LeadResponse(BaseModel):
     source: LeadSource
     last_contact: Optional[date] = None
     ai_analysis: Optional[str] = None
+    social_profiles: Optional[list[dict]] = None
     is_viewed: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

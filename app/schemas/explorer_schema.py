@@ -1,4 +1,14 @@
-from pydantic import BaseModel, Field
+import re
+
+from pydantic import BaseModel, Field, field_validator
+
+_CONTROL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+
+
+def _strip_controls(v: str | None) -> str | None:
+    if v is None:
+        return None
+    return _CONTROL_RE.sub(" ", v).strip() or None
 
 
 class ExplorerSearchRequest(BaseModel):
@@ -43,6 +53,11 @@ class LeadAnalyzeRequest(BaseModel):
     force_refresh: bool = False
     business_context: str | None = Field(None, max_length=2000)
 
+    @field_validator("name", "category", "location", "business_context", mode="before")
+    @classmethod
+    def sanitize_fields(cls, v: str | None) -> str | None:
+        return _strip_controls(v)
+
 
 class LeadAnalyzeResponse(BaseModel):
     analysis: str
@@ -61,6 +76,11 @@ class LeadChatRequest(BaseModel):
     analysis: str | None = None
     question: str = Field(..., min_length=1, max_length=600)
     business_context: str | None = Field(None, max_length=2000)
+
+    @field_validator("name", "category", "location", "question", "business_context", mode="before")
+    @classmethod
+    def sanitize_fields(cls, v: str | None) -> str | None:
+        return _strip_controls(v)
 
 
 class LeadChatResponse(BaseModel):

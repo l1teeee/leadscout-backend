@@ -12,6 +12,7 @@ dependencies = [
     "slowapi==0.1.9",
     "supabase==2.30.1",
     "uvicorn==0.48.0",
+    "playwright>=1.49",
 ]
 
 [dependency-groups]

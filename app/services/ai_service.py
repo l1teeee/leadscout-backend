@@ -78,10 +78,22 @@ def _build_analysis_messages(lead: dict) -> list[dict]:
     social_profiles = social_scrape.get("profiles") or []
     social_status = social_scrape.get("status") or "not_checked"
     social_reason = social_scrape.get("reason") or ""
+    _scrape_contacts = social_scrape.get("contacts") or {}
+    _scrape_emails = _scrape_contacts.get("emails") or []
+    _scrape_phones = _scrape_contacts.get("phones") or []
+    _social_parts: list[str] = []
+    if social_profiles:
+        _social_parts.extend(
+            f"- {profile.get('platform')}: {profile.get('url')}" for profile in social_profiles
+        )
+    if _scrape_emails:
+        _social_parts.append("- Emails detectados: " + ", ".join(_scrape_emails))
+    if _scrape_phones:
+        _social_parts.append("- Telefonos detectados: " + ", ".join(_scrape_phones))
     social_lines = (
-        "\n".join(f"- {profile.get('platform')}: {profile.get('url')}" for profile in social_profiles)
-        if social_profiles
-        else "No se detectaron perfiles sociales en el scraping del sitio web."
+        "\n".join(_social_parts)
+        if _social_parts
+        else "No se detectaron perfiles sociales ni contactos en el scraping del sitio web."
     )
     user_content = (
         f"Analiza este negocio y da recomendaciones específicas y accionables:\n\n"
@@ -141,9 +153,19 @@ def _log_token_usage(data: dict, kind: str, workspace_id: str | None, user_id: s
 
 def _format_social_profiles(lead: dict) -> str:
     profiles = (lead.get("social_profiles") or []) + (lead.get("social_scrape", {}).get("profiles") or [])
-    if not profiles:
-        return "No se detectaron redes sociales."
-    return "\n".join(f"- {p.get('platform', '?')}: {p.get('url', '')}" for p in profiles)
+    lines: list[str] = []
+    if profiles:
+        lines.extend(f"- {p.get('platform', '?')}: {p.get('url', '')}" for p in profiles)
+    contacts = (lead.get("social_scrape") or {}).get("contacts") or {}
+    emails = contacts.get("emails") or []
+    phones = contacts.get("phones") or []
+    if emails:
+        lines.append("- Emails detectados: " + ", ".join(emails))
+    if phones:
+        lines.append("- Telefonos detectados: " + ", ".join(phones))
+    if not lines:
+        return "No se detectaron redes sociales ni contactos."
+    return "\n".join(lines)
 
 
 async def ask_lead_question(

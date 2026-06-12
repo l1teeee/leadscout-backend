@@ -1,5 +1,5 @@
-import pytest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -216,7 +216,12 @@ def test_explorer_mock_search():
         "radius_km": 2.0,
         "category": "Gastronomia",
     }
-    response = client.post("/api/explorer/search", json=payload)
+    # Mock external boundaries so the test is deterministic (no OpenAI/Google network calls).
+    with (
+        patch("app.services.explorer_service.ai_service.validate_openai_ready", new=AsyncMock(return_value=None)),
+        patch("app.services.explorer_service.places_service.search_places", new=AsyncMock(return_value=[])),
+    ):
+        response = client.post("/api/explorer/search", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert "results" in data

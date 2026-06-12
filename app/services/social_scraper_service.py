@@ -7,9 +7,8 @@ import re
 import socket
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
-import httpx
-
 from app.cache import cache
+from app.scraping import FetchResult, fetch  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +16,9 @@ _TIMEOUT = 12.0
 _MAX_HTML_BYTES = 500_000
 _USER_AGENT = "ScoutIA/1.0 (+https://scoutia.dev)"
 _SCRAPE_CACHE_TTL = 43_200  # 12 hours
+_MAX_SUBPAGES = 4
+_MAX_EMAILS = 5
+_MAX_PHONES = 5
 
 _SOCIAL_DOMAINS: tuple[tuple[str, str], ...] = (
     ("instagram", "instagram.com"),
@@ -47,7 +49,6 @@ _SKIP_PATH_PARTS = (
     "/register",
 )
 
-# Sub-pages to probe when homepage yields no social links
 _CONTACT_PATHS = (
     "/contacto",
     "/contact",
@@ -59,6 +60,33 @@ _CONTACT_PATHS = (
     "/acerca-de",
     "/redes-sociales",
     "/social",
+    "/nosotros",
+    "/quienes-somos",
+    "/quienes",
+    "/equipo",
+    "/info",
+    "/empresa",
+    "/company",
+    "/team",
+)
+
+# Keywords used to discover contact/about internal links from HTML
+_CONTACT_LINK_KEYWORDS = (
+    "contacto",
+    "contact",
+    "about",
+    "nosotros",
+    "quienes",
+    "equipo",
+    "info",
+    "redes",
+    "social",
+)
+
+# Patterns to reject obviously-bad email matches
+_EMAIL_NOISE = re.compile(
+    r"example\.com|sentry\.io|wixpress\.com|\.png|\.jpg|\.gif|\.svg|noreply|no-reply",
+    re.IGNORECASE,
 )
 
 
@@ -156,9 +184,12 @@ def _extract_urls(html_text: str, base_url: str) -> list[str]:
     return [urljoin(base_url, html.unescape(value.strip())) for value in [*hrefs, *plain_urls]]
 
 
-def _extract_from_jsonld(html_text: str) -> list[str]:
-    """Extract social URLs from JSON-LD structured data (sameAs property)."""
-    urls: list[str] = []
+def _extract_from_jsonld(html_text: str) -> tuple[list[str], list[str], list[str]]:
+    """Return (social_urls, emails, phones) from JSON-LD structured data."""
+    social_urls: list[str] = []
+    emails: list[str] = []
+    phones: list[str] = []
+
     for script_content in re.findall(
         r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
         html_text,
@@ -169,12 +200,7 @@ def _extract_from_jsonld(html_text: str) -> list[str]:
         except (json.JSONDecodeError, ValueError):
             continue
 
-        if isinstance(data, list):
-            items = data
-        elif isinstance(data, dict):
-            items = [data]
-        else:
-            continue
+        items = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
 
         for item in items:
             same_as = item.get("sameAs") or []
@@ -182,16 +208,41 @@ def _extract_from_jsonld(html_text: str) -> list[str]:
                 same_as = [same_as]
             for u in same_as:
                 if isinstance(u, str) and u.startswith("http"):
-                    urls.append(u)
+                    social_urls.append(u)
 
-    return urls
+            # telephone / email at root level
+            for tel in _iter_str_or_list(item.get("telephone")):
+                phones.append(tel)
+            for em in _iter_str_or_list(item.get("email")):
+                emails.append(em)
+
+            # contactPoint
+            cp = item.get("contactPoint") or []
+            if isinstance(cp, dict):
+                cp = [cp]
+            for point in cp:
+                if not isinstance(point, dict):
+                    continue
+                for tel in _iter_str_or_list(point.get("telephone")):
+                    phones.append(tel)
+                for em in _iter_str_or_list(point.get("email")):
+                    emails.append(em)
+
+    return social_urls, emails, phones
+
+
+def _iter_str_or_list(value: object):
+    if isinstance(value, str) and value.strip():
+        yield value.strip()
+    elif isinstance(value, list):
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                yield item.strip()
 
 
 def _extract_from_meta(html_text: str) -> list[str]:
-    """Extract social links from meta tags (og:see_also, twitter:site, etc.)."""
     urls: list[str] = []
 
-    # <meta property="og:see_also" content="https://facebook.com/..." />
     for m in re.finditer(
         r'<meta[^>]+property=["\']og:see_also["\'][^>]+content=["\']([^"\']+)["\']',
         html_text,
@@ -199,11 +250,6 @@ def _extract_from_meta(html_text: str) -> list[str]:
     ):
         urls.append(m.group(1))
 
-    # <meta name="twitter:site" content="@handle" /> — not a URL, skip
-
-    # Facebook app-id meta can indicate a Facebook presence but isn't a profile URL
-
-    # <link rel="me" href="https://..."> (IndieAuth / Mastodon)
     for m in re.finditer(
         r'<link[^>]+rel=["\']me["\'][^>]+href=["\']([^"\']+)["\']',
         html_text,
@@ -212,6 +258,56 @@ def _extract_from_meta(html_text: str) -> list[str]:
         urls.append(m.group(1))
 
     return urls
+
+
+def _extract_emails(html_text: str) -> list[str]:
+    found: list[str] = []
+    seen: set[str] = set()
+
+    # mailto: links
+    for m in re.finditer(r'mailto:([^\s"\'<>?&]+)', html_text, flags=re.IGNORECASE):
+        addr = m.group(1).lower().strip().rstrip(".,;)")
+        if addr and addr not in seen and not _EMAIL_NOISE.search(addr):
+            seen.add(addr)
+            found.append(addr)
+
+    # conservative email regex (not inside a URL path)
+    for m in re.finditer(
+        r'(?<![/@\w])([a-z0-9._%+\-]{1,64}@[a-z0-9.\-]{1,255}\.[a-z]{2,})',
+        html_text,
+        flags=re.IGNORECASE,
+    ):
+        addr = m.group(1).lower().strip()
+        if addr and addr not in seen and not _EMAIL_NOISE.search(addr):
+            seen.add(addr)
+            found.append(addr)
+
+    return found[:_MAX_EMAILS]
+
+
+def _extract_phones(html_text: str) -> list[str]:
+    found: list[str] = []
+    seen: set[str] = set()
+
+    # tel: links
+    for m in re.finditer(r'tel:([\+0-9\s\-\(\)]{6,20})', html_text, flags=re.IGNORECASE):
+        number = re.sub(r'\s+', '', m.group(1)).strip()
+        if number and number not in seen:
+            seen.add(number)
+            found.append(number)
+
+    # wa.me / api.whatsapp.com links
+    for m in re.finditer(
+        r'(?:wa\.me/|api\.whatsapp\.com/send[^"\']*phone=)([\+0-9]{7,15})',
+        html_text,
+        flags=re.IGNORECASE,
+    ):
+        number = m.group(1).strip()
+        if number and number not in seen:
+            seen.add(number)
+            found.append(number)
+
+    return found[:_MAX_PHONES]
 
 
 def _dedupe_profiles(urls: list[str]) -> list[dict[str, str]]:
@@ -241,84 +337,122 @@ def _dedupe_profiles(urls: list[str]) -> list[dict[str, str]]:
     return profiles
 
 
-async def _fetch_html(client: httpx.AsyncClient, url: str) -> str | None:
-    try:
-        response = await client.get(
-            url,
-            headers={
-                "User-Agent": _USER_AGENT,
-                "Accept": "text/html,application/xhtml+xml",
-            },
-        )
-        response.raise_for_status()
-        content_type = response.headers.get("content-type", "")
-        if "html" not in content_type.lower():
-            return None
-        return response.content[:_MAX_HTML_BYTES].decode(response.encoding or "utf-8", errors="ignore")
-    except (httpx.HTTPError, Exception):
-        return None
+def _merge_emails(base: list[str], new: list[str]) -> list[str]:
+    seen = set(base)
+    result = list(base)
+    for e in new:
+        if e not in seen:
+            seen.add(e)
+            result.append(e)
+    return result[:_MAX_EMAILS]
+
+
+def _merge_phones(base: list[str], new: list[str]) -> list[str]:
+    seen = set(base)
+    result = list(base)
+    for p in new:
+        if p not in seen:
+            seen.add(p)
+            result.append(p)
+    return result[:_MAX_PHONES]
+
+
+def _extract_all_from_page(html_text: str, page_url: str) -> tuple[list[str], list[str], list[str]]:
+    """Return (candidate_social_urls, emails, phones) from a single page."""
+    candidate_urls: list[str] = []
+    candidate_urls.extend(_extract_urls(html_text, page_url))
+    jsonld_social, jsonld_emails, jsonld_phones = _extract_from_jsonld(html_text)
+    candidate_urls.extend(jsonld_social)
+    candidate_urls.extend(_extract_from_meta(html_text))
+
+    emails = _merge_emails(_extract_emails(html_text), jsonld_emails)
+    phones = _merge_phones(_extract_phones(html_text), jsonld_phones)
+    return candidate_urls, emails, phones
+
+
+def _discover_contact_links(html_text: str, base_url: str) -> list[str]:
+    """Return same-origin hrefs whose path contains a contact/about keyword."""
+    all_hrefs = re.findall(r"""href\s*=\s*["']([^"'#?]+)["']""", html_text, flags=re.IGNORECASE)
+    results: list[str] = []
+    seen: set[str] = set()
+    for href in all_hrefs:
+        full = urljoin(base_url, html.unescape(href.strip()))
+        path = urlparse(full).path.lower()
+        if any(kw in path for kw in _CONTACT_LINK_KEYWORDS) and _same_origin(base_url, full):
+            norm = full.rstrip("/")
+            if norm not in seen:
+                seen.add(norm)
+                results.append(full)
+    return results
 
 
 async def _scrape_website(url: str) -> dict:
-    """Fetch homepage + up to 2 contact/about sub-pages, extract all social links."""
-    async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
-        try:
-            response = await client.get(
-                url,
-                headers={
-                    "User-Agent": _USER_AGENT,
-                    "Accept": "text/html,application/xhtml+xml",
-                },
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            return {"status": "failed", "reason": f"Website fetch failed: {exc.__class__.__name__}", "profiles": []}
+    """Fetch homepage + up to _MAX_SUBPAGES contact/about sub-pages."""
+    result = await fetch(url)
+    if result is None:
+        return {
+            "status": "failed",
+            "reason": "Website fetch failed or was blocked.",
+            "profiles": [],
+            "contacts": {"emails": [], "phones": []},
+        }
 
-        content_type = response.headers.get("content-type", "")
-        if "html" not in content_type.lower():
-            return {"status": "none", "reason": "Website response was not HTML.", "profiles": []}
+    final_url = result.final_url
+    html_text = result.html
 
-        final_url = str(response.url)
-        html_text = response.content[:_MAX_HTML_BYTES].decode(response.encoding or "utf-8", errors="ignore")
+    candidate_urls, all_emails, all_phones = _extract_all_from_page(html_text, final_url)
+    profiles = _dedupe_profiles(candidate_urls)
 
-    # Collect candidate URLs from homepage: hrefs + JSON-LD + meta
-    all_candidate_urls: list[str] = []
-    all_candidate_urls.extend(_extract_urls(html_text, final_url))
-    all_candidate_urls.extend(_extract_from_jsonld(html_text))
-    all_candidate_urls.extend(_extract_from_meta(html_text))
+    # Discover contact-looking links from homepage HTML
+    discovered_links = _discover_contact_links(html_text, final_url)
 
-    profiles = _dedupe_profiles(all_candidate_urls)
+    # Build the subpage queue: discovered links first, then guessed paths
+    parsed_base = urlparse(final_url)
+    base = f"{parsed_base.scheme}://{parsed_base.netloc}"
+    guessed_urls = [base + path for path in _CONTACT_PATHS]
 
-    # If homepage didn't yield social links, try contact/about sub-pages
-    if not profiles:
-        parsed_base = urlparse(final_url)
-        base = f"{parsed_base.scheme}://{parsed_base.netloc}"
+    subpage_queue: list[str] = []
+    seen_sub: set[str] = set()
+    for link in [*discovered_links, *guessed_urls]:
+        norm = link.rstrip("/")
+        if norm not in seen_sub and norm != final_url.rstrip("/"):
+            seen_sub.add(norm)
+            subpage_queue.append(link)
 
-        async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client2:
-            pages_fetched = 0
-            for path in _CONTACT_PATHS:
-                if pages_fetched >= 2:
-                    break
-                sub_url = base + path
-                sub_html = await _fetch_html(client2, sub_url)
-                if sub_html is None:
-                    continue
-                pages_fetched += 1
+    pages_fetched = 0
+    for sub_url in subpage_queue:
+        if pages_fetched >= _MAX_SUBPAGES:
+            break
+        sub_result = await fetch(sub_url)
+        if sub_result is None:
+            continue
+        pages_fetched += 1
 
-                sub_candidates: list[str] = []
-                sub_candidates.extend(_extract_urls(sub_html, sub_url))
-                sub_candidates.extend(_extract_from_jsonld(sub_html))
-                sub_candidates.extend(_extract_from_meta(sub_html))
+        sub_candidates, sub_emails, sub_phones = _extract_all_from_page(sub_result.html, sub_result.final_url)
+        all_emails = _merge_emails(all_emails, sub_emails)
+        all_phones = _merge_phones(all_phones, sub_phones)
 
-                profiles = _dedupe_profiles(sub_candidates)
-                if profiles:
-                    logger.debug("Social links found on sub-page %s: %d profiles", path, len(profiles))
-                    break
+        if not profiles:
+            sub_profiles = _dedupe_profiles(sub_candidates)
+            if sub_profiles:
+                profiles = sub_profiles
+                logger.debug(
+                    "Social links found on sub-page %s: %d profiles",
+                    sub_url,
+                    len(sub_profiles),
+                )
 
+    contacts = {"emails": all_emails, "phones": all_phones}
+    found = bool(profiles or all_emails or all_phones)
     return {
-        "status": "found" if profiles else "none",
-        "reason": "Social links found in website content." if profiles else "No social links found after deep scrape.",
+        "status": "found" if found else "none",
+        "reason": (
+            "Social links and/or contacts found in website content."
+            if found
+            else "No social links or contacts found after deep scrape."
+        ),
         "profiles": profiles,
+        "contacts": contacts,
     }
 
 
@@ -328,6 +462,7 @@ async def detect_social_profiles(website: str | None) -> dict:
             "status": "not_checked",
             "reason": "No website URL was available to scrape.",
             "profiles": [],
+            "contacts": {"emails": [], "phones": []},
         }
 
     url = _with_scheme(website)
@@ -337,10 +472,16 @@ async def detect_social_profiles(website: str | None) -> dict:
             "status": "found",
             "reason": "Website URL is a social profile.",
             "profiles": [{"platform": platform, "url": _clean_social_url(url)}],
+            "contacts": {"emails": [], "phones": []},
         }
 
     if not await _is_safe_url(url):
-        return {"status": "skipped", "reason": "Website URL is not safe to fetch.", "profiles": []}
+        return {
+            "status": "skipped",
+            "reason": "Website URL is not safe to fetch.",
+            "profiles": [],
+            "contacts": {"emails": [], "phones": []},
+        }
 
     cache_key = f"social-scrape:{url}"
     cached = await cache.get(cache_key)

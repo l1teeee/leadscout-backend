@@ -2,6 +2,7 @@ import asyncio
 import logging
 import math
 import time
+from urllib.parse import urlparse
 
 from app.exceptions import ExternalServiceError
 from app.repositories import leads_repository, search_audit_repository
@@ -117,6 +118,25 @@ _EXCLUDED_BRANDS: frozenset[str] = frozenset({
 def _is_excluded_brand(name: str) -> bool:
     lower = name.lower()
     return any(brand in lower for brand in _EXCLUDED_BRANDS)
+
+
+_SOCIAL_DOMAINS = {
+    "facebook.com", "fb.com", "instagram.com", "tiktok.com",
+    "twitter.com", "x.com", "linkedin.com", "youtube.com",
+    "youtu.be", "wa.me", "whatsapp.com",
+}
+
+
+def _is_social_url(url: str) -> bool:
+    if not url:
+        return False
+    try:
+        host = urlparse(url).hostname or ""
+        if host.startswith("www."):
+            host = host[4:]
+        return host in _SOCIAL_DOMAINS or any(host.endswith(f".{d}") for d in _SOCIAL_DOMAINS)
+    except Exception:
+        return False
 
 
 def _priority_from_score(score: int) -> str:
@@ -248,7 +268,7 @@ async def _process_place(
             if place_id:
                 existing = await loop.run_in_executor(None, lambda: leads_repository.find_by_place_id(place_id, workspace_id))
 
-            has_website = bool(place_data.get("website"))
+            has_website = bool(place_data.get("website")) and not _is_social_url(place_data.get("website") or "")
             has_phone = bool(place_data.get("formatted_phone_number"))
             has_rating = bool(place_data.get("rating"))
             website_url: str = place_data.get("website") or ""

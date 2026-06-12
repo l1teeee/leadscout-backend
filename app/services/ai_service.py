@@ -181,12 +181,12 @@ async def ask_lead_question(
     resp = await _get_http().post(
         _OPENAI_URL,
         json={
-            "model": settings.OPENAI_MODEL,
+            "model": settings.OPENAI_ANALYSIS_MODEL,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": question},
             ],
-            "max_tokens": 250,
+            "max_tokens": 400,
             "temperature": 0.6,
         },
         headers={
@@ -214,9 +214,9 @@ async def analyze_lead_with_social(
     resp = await _get_http().post(
         _OPENAI_URL,
         json={
-            "model": settings.OPENAI_MODEL,
+            "model": settings.OPENAI_ANALYSIS_MODEL,
             "messages": messages,
-            "max_tokens": 600,
+            "max_tokens": 900,
             "temperature": 0.6,
         },
         headers={
@@ -250,17 +250,7 @@ def _brand_classification_messages(place: dict) -> list[dict[str, str]]:
     return [
         {
             "role": "system",
-            "content": (
-                "You classify Google Places businesses for a lead generation product. "
-                "The product must keep only local independent small businesses, entrepreneurs, "
-                "local service providers, neighborhood stores, clinics, salons, restaurants, "
-                "workshops, and SMBs. Mark as ineligible if the business appears to be a "
-                "recognized national or international brand, franchise, corporate chain, bank, "
-                "telecom, supermarket chain, gas station chain, mall/branch of a large retailer, "
-                "government/public institution, marketplace, or if the evidence is unclear. "
-                "Be conservative: unknown or ambiguous corporate-looking brands are not eligible. "
-                "Return only valid JSON."
-            ),
+            "content": "You classify Google Places businesses for a lead generation product targeting El Salvador and Central America. ELIGIBLE: local independent small businesses, micro-entrepreneurs, neighborhood stores, clinics, salons, restaurants, workshops, personal-name businesses, SMBs, local services - even if their name is unfamiliar. INELIGIBLE: businesses that are clearly recognized national or international chains, franchises, corporate branches, banks, telecoms, supermarket chains, gas station chains, malls, government institutions, or online marketplaces. Default to ELIGIBLE when the evidence is ambiguous or the name is simply unknown - unknown does not mean chain. Only mark ineligible when there is clear evidence of being a chain or institution. Return only valid JSON.",
         },
         {
             "role": "user",

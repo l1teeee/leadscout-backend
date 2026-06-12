@@ -150,7 +150,7 @@ async def search_places(
                 await asyncio.sleep(2)
                 page2_resp = await client.post(
                     _TEXTSEARCH_URL,
-                    json={"pageToken": next_token},
+                    json={**body, "pageToken": next_token},
                     headers={
                         "Content-Type": "application/json",
                         "X-Goog-Api-Key": settings.GOOGLE_PLACES_API_KEY,
@@ -159,9 +159,32 @@ async def search_places(
                 )
                 page2_resp.raise_for_status()
                 page2_payload = page2_resp.json()
-                results += [_normalize_place(p) for p in page2_payload.get("places", [])]
-            except Exception:
-                pass
+                page2_results = [_normalize_place(p) for p in page2_payload.get("places", [])]
+                results += page2_results
+                logger.debug("Google Places page 2 fetched: %d places", len(page2_results))
+
+                page3_token = page2_payload.get("nextPageToken")
+                if page3_token:
+                    try:
+                        await asyncio.sleep(2)
+                        page3_resp = await client.post(
+                            _TEXTSEARCH_URL,
+                            json={**body, "pageToken": page3_token},
+                            headers={
+                                "Content-Type": "application/json",
+                                "X-Goog-Api-Key": settings.GOOGLE_PLACES_API_KEY,
+                                "X-Goog-FieldMask": _TEXTSEARCH_FIELD_MASK,
+                            },
+                        )
+                        page3_resp.raise_for_status()
+                        page3_payload = page3_resp.json()
+                        page3_results = [_normalize_place(p) for p in page3_payload.get("places", [])]
+                        results += page3_results
+                        logger.debug("Google Places page 3 fetched: %d places", len(page3_results))
+                    except Exception as exc:
+                        logger.warning("Google Places page 3 fetch failed: %s", exc)
+            except Exception as exc:
+                logger.warning("Google Places page 2 fetch failed: %s", exc)
 
         if results:
             await cache.set(key, results, ttl=TTL_PLACES)

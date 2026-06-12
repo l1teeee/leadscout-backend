@@ -25,10 +25,13 @@ _GENERIC_QUERY_GROUPS = [
         "hoteles hospedajes turismo",
         "tiendas farmacias supermercados",
         "salones gimnasios servicios profesionales",
+        "panaderías pupuserías comedores locales",
+        "talleres mecánicos servicios automotrices",
+        "peluquerías barberías salones de belleza",
     ],
     [
         "panaderías pupuserías comedores",
-        "talleres mecánicos llanterías",
+        "talleres mecánicos llanteras",
         "peluquerías barberías salones de belleza",
         "ferreterías materiales de construcción",
         "veterinarias mascotas",
@@ -427,6 +430,10 @@ async def search_and_save(workspace_id: str, user_id: str, request: ExplorerSear
     if not results and process_errors:
         raise process_errors[0]
 
+    logger.info(
+        "Explorer pipeline: raw_places=%d | results_returned=%d | new_leads_saved=%d | errors=%d",
+        len(raw_places), len(results), saved_new, len(process_errors),
+    )
     asyncio.create_task(_log_search_audit(user_id, workspace_id, request, len(results), saved_new))
     logger.info("Explorer complete: %d results, %d new leads saved", len(results), saved_new)
     return ExplorerSearchResponse(results=results, total=len(results), saved_new=saved_new)

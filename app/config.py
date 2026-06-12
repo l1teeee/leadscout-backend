@@ -49,6 +49,7 @@ class Settings(BaseSettings):
 
     OPENAI_API_KEY: SecretStr = SecretStr("")
     OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_ANALYSIS_MODEL: str = "gpt-4o"
 
     LOG_LEVEL: str = "info"
 

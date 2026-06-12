@@ -10,7 +10,7 @@ def test_perfect_score():
         pagespeed_score=80,
         has_complete_google_business=True,
     )
-    assert score == 100
+    assert score == 0
     assert issues == []
 
 
@@ -23,7 +23,7 @@ def test_no_website_adds_35():
         pagespeed_score=80,
         has_complete_google_business=True,
     )
-    assert score == 100 - 35
+    assert score == 35
     assert "Sin sitio web" in issues
 
 
@@ -36,7 +36,7 @@ def test_no_phone_adds_15():
         pagespeed_score=80,
         has_complete_google_business=True,
     )
-    assert score == 100 - 15
+    assert score == 15
     assert "Sin telefono registrado" in issues
 
 
@@ -49,7 +49,7 @@ def test_no_ssl_adds_15():
         pagespeed_score=80,
         has_complete_google_business=True,
     )
-    assert score == 100 - 15
+    assert score == 15
     assert "Sitio web sin SSL" in issues
 
 
@@ -75,7 +75,7 @@ def test_low_pagespeed_adds_20():
         pagespeed_score=PAGESPEED_THRESHOLD - 1,
         has_complete_google_business=True,
     )
-    assert score == 100 - 20
+    assert score == 20
     assert "Rendimiento web bajo" in issues
 
 
@@ -100,11 +100,11 @@ def test_incomplete_gmb_adds_20():
         pagespeed_score=80,
         has_complete_google_business=False,
     )
-    assert score == 100 - 20
+    assert score == 20
     assert "Perfil de Google Business incompleto" in issues
 
 
-def test_score_clamped_to_zero():
+def test_score_clamped_to_hundred():
     score, _ = calculate_score(
         has_website=False,
         has_phone=False,
@@ -113,7 +113,7 @@ def test_score_clamped_to_zero():
         pagespeed_score=10,
         has_complete_google_business=False,
     )
-    assert score == 0
+    assert score == 100
 
 
 def test_all_issues_accumulate():
@@ -126,4 +126,4 @@ def test_all_issues_accumulate():
         has_complete_google_business=False,
     )
     assert len(issues) == 5
-    assert score == 0
+    assert score == 100

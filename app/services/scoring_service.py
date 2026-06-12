@@ -42,4 +42,4 @@ def calculate_score(
             risk += rule.risk
             issues.append(rule.issue)
 
-    return max(0, 100 - risk), issues
+    return min(100, risk), issues

@@ -120,9 +120,9 @@ def _is_excluded_brand(name: str) -> bool:
 
 
 def _priority_from_score(score: int) -> str:
-    if score <= 20:
+    if score >= 80:
         return "alta"
-    if score <= 40:
+    if score >= 60:
         return "media"
     return "baja"
 

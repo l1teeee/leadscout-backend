@@ -140,9 +140,9 @@ def _is_social_url(url: str) -> bool:
 
 
 def _priority_from_score(score: int) -> str:
-    if score >= 80:
-        return "alta"
     if score >= 60:
+        return "alta"
+    if score >= 35:
         return "media"
     return "baja"
 

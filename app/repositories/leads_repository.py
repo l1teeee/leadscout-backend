@@ -21,6 +21,7 @@ def list_leads(
     category: str | None = None,
     min_score: int | None = None,
     max_score: int | None = None,
+    is_viewed: bool | None = None,
     sort_by: str = "created_at",
     sort_order: str = "desc",
     limit: int = 100,
@@ -42,6 +43,8 @@ def list_leads(
         query = query.gte("score", min_score)
     if max_score is not None:
         query = query.lte("score", max_score)
+    if is_viewed is not None:
+        query = query.eq("is_viewed", is_viewed)
     query = query.order(sort_by, desc=(sort_order == "desc"))
     result = query.range(offset, offset + limit - 1).execute()
     data = result.data

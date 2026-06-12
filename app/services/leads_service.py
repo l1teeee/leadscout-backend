@@ -24,6 +24,7 @@ async def list_leads(workspace_id: str, filters: LeadFilters, pagination: Pagina
         category=filters.category,
         min_score=filters.min_score,
         max_score=filters.max_score,
+        is_viewed=filters.is_viewed,
         sort_by=filters.safe_sort_by,
         sort_order=filters.sort_order or "desc",
         limit=pagination.limit,

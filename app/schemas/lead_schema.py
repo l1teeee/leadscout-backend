@@ -80,6 +80,7 @@ class LeadFilters(BaseModel):
     max_score: Optional[int] = Field(None, ge=0, le=100)
     sort_by: Optional[str] = Field("created_at", max_length=50)
     sort_order: Optional[str] = Field("desc", pattern="^(asc|desc)$")
+    is_viewed: Optional[bool] = None
 
     @property
     def safe_sort_by(self) -> str:

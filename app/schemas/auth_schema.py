@@ -65,3 +65,18 @@ class AuthResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class VerifyRegistrationOtpRequest(BaseModel):
+    email: str = Field(..., min_length=1, max_length=320)
+    code: str = Field(..., min_length=6, max_length=6)
+
+
+class VerifyResetOtpRequest(BaseModel):
+    email: str = Field(..., min_length=1, max_length=320)
+    code: str = Field(..., min_length=6, max_length=6)
+
+
+class ResetPasswordOtpRequest(BaseModel):
+    reset_token: str
+    new_password: str = Field(..., min_length=8, max_length=128)

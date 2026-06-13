@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_ANALYSIS_MODEL: str = "gpt-4o"
 
+    BREVO_API_KEY: SecretStr = SecretStr("")
+    BREVO_SENDER_EMAIL: str = "notifications@scoutia.dev"
+    BREVO_SENDER_NAME: str = "Scoutia"
+
     LOG_LEVEL: str = "info"
 
     PROXY_LIST: str = ""
@@ -95,6 +99,10 @@ class Settings(BaseSettings):
     @property
     def openai_configured(self) -> bool:
         return bool(self.OPENAI_API_KEY.get_secret_value())
+
+    @property
+    def brevo_configured(self) -> bool:
+        return bool(self.BREVO_API_KEY.get_secret_value())
 
     @property
     def proxies_list(self) -> list[str]:

@@ -73,3 +73,13 @@ class AiContextSettings(BaseModel):
 class AiContextUpdate(BaseModel):
     business_context: Optional[str] = Field(None, max_length=1000)
     constraints: Optional[str] = Field(None, max_length=800)
+
+
+class AiContextExampleRequest(BaseModel):
+    business_type: str = Field(..., min_length=3, max_length=160)
+    lang: str = Field("es", pattern="^(en|es)$")
+
+
+class AiContextExampleResponse(BaseModel):
+    business_context: str
+    constraints: str

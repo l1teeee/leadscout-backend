@@ -4,6 +4,8 @@ from app.dependencies import CurrentToken, CurrentUser, CurrentWorkspace
 from app.exceptions import ProfileUpdateError, WorkspaceNotFoundError
 from app.schemas.auth_schema import AuthUser
 from app.schemas.settings_schema import (
+    AiContextExampleRequest,
+    AiContextExampleResponse,
     AiContextSettings,
     AiContextUpdate,
     AuditSettings,
@@ -13,7 +15,7 @@ from app.schemas.settings_schema import (
     WorkspaceSettings,
     WorkspaceUpdate,
 )
-from app.services import settings_service
+from app.services import ai_service, settings_service
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -76,3 +78,12 @@ async def update_ai_context(body: AiContextUpdate, workspace_id: CurrentWorkspac
     if not body.model_dump(exclude_none=True):
         raise HTTPException(status_code=422, detail="No hay campos para actualizar.")
     return await settings_service.update_ai_context(workspace_id, body)
+
+
+@router.post("/ai-context/example", response_model=AiContextExampleResponse)
+async def generate_ai_context_example(body: AiContextExampleRequest, _: CurrentWorkspace):
+    try:
+        result = await ai_service.generate_ai_context_example(body.business_type, body.lang)
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))

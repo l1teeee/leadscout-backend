@@ -691,6 +691,60 @@ _PLATFORM_INSTRUCTIONS_DEFAULT = (
 )
 
 
+async def check_lead_quality(leads: list[dict]) -> list[str]:
+    """Batch-analyze leads with AI. Returns IDs of junk/low-quality leads."""
+    if not leads:
+        return []
+    if not settings.openai_configured:
+        return []
+    lines = []
+    for lead in leads:
+        phone = lead.get("phone") or "sin teléfono"
+        website = lead.get("website") or "sin sitio web"
+        lines.append(
+            f'- ID:{lead["id"]} | Nombre:"{_sanitize_text(lead.get("name",""),100)}"'
+            f' | Cat:{_sanitize_text(lead.get("category",""),60)}'
+            f' | Tel:{phone} | Web:{website} | Score:{lead.get("score",0)}'
+        )
+    leads_text = "\n".join(lines)
+    system = (
+        "Eres un analizador de calidad de datos de negocios. "
+        "Identifica cuáles leads son basura: nombres genéricos usados como nombre de negocio "
+        "(países, categorías genéricas, palabras sueltas), nombres sin sentido, o datos claramente incompletos. "
+        "Responde SOLO con un JSON array de strings con los IDs basura. "
+        "Ejemplo: [\"id1\",\"id2\"]. Si todos son válidos responde []."
+    )
+    user = f"Analiza y devuelve los IDs basura:\n{leads_text}"
+    try:
+        resp = await _get_http().post(
+            _OPENAI_URL,
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                "max_tokens": 500,
+                "temperature": 0,
+            },
+            headers={
+                "Authorization": f"Bearer {settings.OPENAI_API_KEY.get_secret_value()}",
+                "Content-Type": "application/json",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        text = data["choices"][0]["message"]["content"].strip()
+        # Strip markdown code fences if present
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        import json as _json
+        parsed = _json.loads(text.strip())
+        return [str(i) for i in parsed if isinstance(i, str)]
+    except Exception:
+        logger.warning("check_lead_quality AI call failed", exc_info=True)
+        return []
+
+
 async def generate_outreach_message(
     lead: dict,
     platform: str,

@@ -91,3 +91,20 @@ class LeadFilters(BaseModel):
 
 class LeadListResponse(PaginatedResponse[LeadResponse]):
     pass
+
+
+class LeadQualityItem(BaseModel):
+    id: str
+    name: str
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    category: str
+    score: int = 0
+
+
+class LeadQualityCheckRequest(BaseModel):
+    leads: list[LeadQualityItem]
+
+
+class LeadQualityCheckResponse(BaseModel):
+    junk_ids: list[str]

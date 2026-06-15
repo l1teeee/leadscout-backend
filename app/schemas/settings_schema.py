@@ -83,3 +83,13 @@ class AiContextExampleRequest(BaseModel):
 class AiContextExampleResponse(BaseModel):
     business_context: str
     constraints: str
+
+
+class AiContextImportRequest(BaseModel):
+    json_payload: dict | list = Field(...)
+    lang: str = Field("es", pattern="^(en|es)$")
+
+
+class AiContextImportResponse(BaseModel):
+    business_context: str
+    constraints: str

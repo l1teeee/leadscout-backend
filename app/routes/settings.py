@@ -6,6 +6,8 @@ from app.schemas.auth_schema import AuthUser
 from app.schemas.settings_schema import (
     AiContextExampleRequest,
     AiContextExampleResponse,
+    AiContextImportRequest,
+    AiContextImportResponse,
     AiContextSettings,
     AiContextUpdate,
     AuditSettings,
@@ -84,6 +86,15 @@ async def update_ai_context(body: AiContextUpdate, workspace_id: CurrentWorkspac
 async def generate_ai_context_example(body: AiContextExampleRequest, _: CurrentWorkspace):
     try:
         result = await ai_service.generate_ai_context_example(body.business_type, body.lang)
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@router.post("/ai-context/import", response_model=AiContextImportResponse)
+async def import_ai_context(body: AiContextImportRequest, _: CurrentWorkspace):
+    try:
+        result = await ai_service.import_ai_context_from_json(body.json_payload, body.lang)
         return result
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc))

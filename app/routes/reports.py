@@ -20,7 +20,10 @@ async def get_summary(workspace_id: CurrentWorkspace):
 async def get_timeline(
     workspace_id: CurrentWorkspace,
     days: int = Query(default=30, ge=7, le=90),
+    all: bool = Query(default=False),
 ):
+    if all:
+        return await reports_service.get_timeline_all(workspace_id)
     return await reports_service.get_timeline(workspace_id, days)
 
 

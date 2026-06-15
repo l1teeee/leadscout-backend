@@ -1,4 +1,5 @@
 import logging
+from datetime import date as _date
 from datetime import datetime, timedelta, timezone
 
 from app.async_utils import run_sync
@@ -22,7 +23,7 @@ async def get_summary(workspace_id: str) -> dict:
 
 async def invalidate(workspace_id: str) -> None:
     await cache.invalidate_prefix(f"reports:summary:{workspace_id}")
-    for days in (7, 30, 90):
+    for days in (7, 30, 90, "all"):
         await cache.invalidate_prefix(f"reports:timeline:{workspace_id}:{days}")
 
 
@@ -87,4 +88,33 @@ def _daily_activity(leads: list[dict], days: int) -> list[dict]:
             "leads": sum(1 for r in leads if (r.get("created_at") or "")[:10] == day.isoformat()),
         }
         for i in range(days - 1, -1, -1)
+    ]
+
+
+async def get_timeline_all(workspace_id: str) -> dict:
+    key = f"reports:timeline:{workspace_id}:all"
+    cached = await cache.get(key)
+    if cached is not None:
+        return cached
+    leads = await run_sync(leads_repository.list_all, workspace_id)
+    result = {"days": None, "points": _all_time_activity(leads)}
+    await cache.set(key, result, ttl=TTL_REPORTS)
+    return result
+
+
+def _all_time_activity(leads: list[dict]) -> list[dict]:
+    if not leads:
+        return []
+    dates = [r.get("created_at", "")[:10] for r in leads if r.get("created_at")]
+    if not dates:
+        return []
+    start = _date.fromisoformat(min(dates))
+    today = datetime.now(timezone.utc).date()
+    total_days = (today - start).days + 1
+    return [
+        {
+            "date": (day := today - timedelta(days=i)).isoformat(),
+            "leads": sum(1 for r in leads if (r.get("created_at") or "")[:10] == day.isoformat()),
+        }
+        for i in range(total_days - 1, -1, -1)
     ]

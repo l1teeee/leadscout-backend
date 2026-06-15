@@ -354,29 +354,43 @@ async def generate_ai_context_example(business_type: str, lang: str = "es") -> d
         constraints = _sanitize_text(str(parsed.get("constraints") or ""), 800)
         if not business_context or not constraints:
             raise ValueError("Incomplete AI output")
-        if _PROMPT_INJECTION_RE.search(business_context + constraints):
-            raise ValueError("Unsafe AI output")
         return {"business_context": business_context, "constraints": constraints}
     except (json.JSONDecodeError, KeyError) as exc:
         raise ValueError("Invalid AI output format") from exc
+
+
+def _sanitize_json_value(value: object, depth: int = 0) -> object:
+    """Recursively scrub injection/sensitive text from JSON values instead of rejecting."""
+    if depth > 8:
+        return None
+    if isinstance(value, str):
+        out = _PROMPT_INJECTION_RE.sub("[removed]", value[:2000])
+        out = _SENSITIVE_RE.sub("[redacted]", out)
+        return out
+    if isinstance(value, list):
+        return [_sanitize_json_value(item, depth + 1) for item in value[:200]]
+    if isinstance(value, dict):
+        return {
+            k[:100]: _sanitize_json_value(v, depth + 1)
+            for k, v in list(value.items())[:100]
+        }
+    return value
 
 
 async def import_ai_context_from_json(json_payload: dict | list, lang: str = "es") -> dict:
     if not settings.openai_configured:
         raise ValueError("OPENAI_API_KEY not configured")
 
+    # Sanitize: scrub injection & secrets inline, never reject the whole payload
+    clean_payload = _sanitize_json_value(json_payload)
+
     try:
-        serialized = json.dumps(json_payload, ensure_ascii=False, indent=2)
+        serialized = json.dumps(clean_payload, ensure_ascii=False, indent=2)
     except (TypeError, ValueError) as exc:
         raise ValueError("Cannot serialize JSON payload") from exc
 
     if len(serialized) > 12_000:
         raise ValueError("JSON payload too large")
-
-    if _PROMPT_INJECTION_RE.search(serialized):
-        raise ValueError("Unsafe JSON content")
-    if _SENSITIVE_RE.search(serialized):
-        raise ValueError("Unsafe JSON content")
 
     lang_instruction = "Write both fields in Spanish." if lang == "es" else "Write both fields in English."
     system_prompt = "\n".join([
@@ -424,12 +438,16 @@ async def import_ai_context_from_json(json_payload: dict | list, lang: str = "es
     text = data["choices"][0]["message"]["content"].strip()
     try:
         parsed = json.loads(text)
-        business_context = _sanitize_text(str(parsed.get("business_context") or ""), 1000)
-        constraints = _sanitize_text(str(parsed.get("constraints") or ""), 800)
+        business_context = _sanitize_text(
+            _PROMPT_INJECTION_RE.sub("[removed]", _SENSITIVE_RE.sub("[redacted]", str(parsed.get("business_context") or ""))),
+            1000,
+        )
+        constraints = _sanitize_text(
+            _PROMPT_INJECTION_RE.sub("[removed]", _SENSITIVE_RE.sub("[redacted]", str(parsed.get("constraints") or ""))),
+            800,
+        )
         if not business_context or not constraints:
             raise ValueError("Incomplete AI output")
-        if _PROMPT_INJECTION_RE.search(business_context + constraints):
-            raise ValueError("Unsafe AI output")
         return {"business_context": business_context, "constraints": constraints}
     except (json.JSONDecodeError, KeyError) as exc:
         raise ValueError("Invalid AI output format") from exc

@@ -22,6 +22,20 @@ async def get_summary(workspace_id: str) -> dict:
 
 async def invalidate(workspace_id: str) -> None:
     await cache.invalidate_prefix(f"reports:summary:{workspace_id}")
+    for days in (7, 30, 90):
+        await cache.invalidate_prefix(f"reports:timeline:{workspace_id}:{days}")
+
+
+async def get_timeline(workspace_id: str, days: int) -> dict:
+    days = days if days in (7, 30, 90) else 30
+    key = f"reports:timeline:{workspace_id}:{days}"
+    cached = await cache.get(key)
+    if cached is not None:
+        return cached
+    leads = await run_sync(leads_repository.list_all, workspace_id)
+    result = {"days": days, "points": _daily_activity(leads, days)}
+    await cache.set(key, result, ttl=TTL_REPORTS)
+    return result
 
 
 async def _compute_summary(workspace_id: str) -> dict:
@@ -62,4 +76,15 @@ def _weekly_activity(leads: list[dict]) -> list[dict]:
             "leads": sum(1 for r in leads if (r.get("created_at") or "")[:10] == day.isoformat()),
         }
         for i in range(6, -1, -1)
+    ]
+
+
+def _daily_activity(leads: list[dict], days: int) -> list[dict]:
+    today = datetime.now(timezone.utc).date()
+    return [
+        {
+            "date": (day := today - timedelta(days=i)).isoformat(),
+            "leads": sum(1 for r in leads if (r.get("created_at") or "")[:10] == day.isoformat()),
+        }
+        for i in range(days - 1, -1, -1)
     ]

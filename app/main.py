@@ -40,6 +40,8 @@ async def lifespan(app: FastAPI):
     logger.info("Google Places: %s", "enabled" if settings.google_places_configured else "disabled")
     yield
     await cache.close()
+    from app.scraping.browser_pool import browser_pool
+    await browser_pool.close()
     logger.info("Shutting down %s", settings.APP_NAME)
 
 

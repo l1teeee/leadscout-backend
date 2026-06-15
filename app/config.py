@@ -51,7 +51,20 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_ANALYSIS_MODEL: str = "gpt-4o"
 
+    BREVO_API_KEY: SecretStr = SecretStr("")
+    BREVO_SENDER_EMAIL: str = "notifications@scoutia.dev"
+    BREVO_SENDER_NAME: str = "Scoutia"
+
     LOG_LEVEL: str = "info"
+
+    PROXY_LIST: str = ""
+    PLAYWRIGHT_ENABLED: bool = False
+    SCRAPER_MAX_CONCURRENCY: int = 8
+    SCRAPER_BROWSER_CONCURRENCY: int = 2
+    SCRAPER_PER_DOMAIN_RPS: float = 0.5
+    SCRAPER_MAX_RETRIES: int = 2
+    SCRAPER_CB_FAILURE_THRESHOLD: int = 4
+    SCRAPER_CB_COOLDOWN_S: int = 300
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
@@ -86,6 +99,14 @@ class Settings(BaseSettings):
     @property
     def openai_configured(self) -> bool:
         return bool(self.OPENAI_API_KEY.get_secret_value())
+
+    @property
+    def brevo_configured(self) -> bool:
+        return bool(self.BREVO_API_KEY.get_secret_value())
+
+    @property
+    def proxies_list(self) -> list[str]:
+        return [p.strip() for p in self.PROXY_LIST.split(",") if p.strip()]
 
 
 settings = Settings()

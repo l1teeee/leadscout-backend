@@ -16,6 +16,9 @@ from app.schemas.auth_schema import (
     OnboardingRequest,
     RegisterRequest,
     ResetPasswordRequest,
+    VerifyRegistrationOtpRequest,
+    VerifyResetOtpRequest,
+    ResetPasswordOtpRequest,
 )
 from app.services import auth_service
 
@@ -124,3 +127,45 @@ async def reset_password(request: Request, body: ResetPasswordRequest):
     except Exception as exc:
         logger.error("Reset password error: %s", exc)
         raise HTTPException(status_code=400, detail="Token invalido o expirado.")
+
+
+@router.post("/verify-registration-otp", response_model=AuthResponse)
+@limiter.limit("10/minute", key_func=get_remote_address)
+async def verify_registration_otp(request: Request, body: VerifyRegistrationOtpRequest):
+    try:
+        return await auth_service.verify_registration_otp(body.email, body.code)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except ExternalServiceError as exc:
+        raise HTTPException(status_code=503, detail=exc.message)
+    except Exception:
+        logger.exception("OTP verification failed")
+        raise HTTPException(status_code=400, detail="No se pudo verificar el codigo.")
+
+
+@router.post("/verify-reset-otp", response_model=MessageResponse)
+@limiter.limit("10/minute", key_func=get_remote_address)
+async def verify_reset_otp(request: Request, body: VerifyResetOtpRequest):
+    try:
+        reset_token = await auth_service.verify_reset_otp(body.email, body.code)
+        return MessageResponse(message=reset_token)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        logger.exception("Reset OTP verification failed")
+        raise HTTPException(status_code=400, detail="Codigo incorrecto o expirado.")
+
+
+@router.post("/reset-password-otp", response_model=MessageResponse)
+@limiter.limit("5/minute", key_func=get_remote_address)
+async def reset_password_otp(request: Request, body: ResetPasswordOtpRequest):
+    try:
+        await auth_service.reset_password_with_otp_token(body.reset_token, body.new_password)
+        return MessageResponse(message="Contrasena actualizada correctamente.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except ExternalServiceError as exc:
+        raise HTTPException(status_code=503, detail=exc.message)
+    except Exception:
+        logger.exception("OTP password reset failed")
+        raise HTTPException(status_code=400, detail="No se pudo restablecer la contrasena.")

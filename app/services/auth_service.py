@@ -1,5 +1,6 @@
 import logging
-from datetime import UTC, datetime
+import uuid
+from datetime import UTC, datetime, timedelta
 
 from app.async_utils import run_sync
 from app.cache import TTL_AUTH_TOKEN, cache
@@ -114,6 +115,78 @@ def _sign(user: AuthUser) -> AuthUser:
     return user
 
 
+def _create_reset_token(user_id: str, email: str) -> str:
+    """Short-lived 15-minute token specifically for password reset after OTP verification."""
+    import jwt as _jwt
+    from app.config import settings
+    secret = settings.SIGNING_SECRET.get_secret_value() or "dev-only-insecure-secret-change-in-prod"
+    now = datetime.now(UTC)
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "type": "password_reset",
+        "jti": str(uuid.uuid4()),
+        "exp": int((now + timedelta(minutes=15)).timestamp()),
+    }
+    return _jwt.encode(payload, secret, algorithm="HS256")
+
+
+def _verify_reset_token(token: str) -> dict | None:
+    """Verify reset token and return payload, or None if invalid/expired."""
+    import jwt as _jwt
+    from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
+    from app.config import settings
+    secret = settings.SIGNING_SECRET.get_secret_value() or "dev-only-insecure-secret-change-in-prod"
+    try:
+        payload = _jwt.decode(token, secret, algorithms=["HS256"])
+        if payload.get("type") != "password_reset":
+            return None
+        return payload
+    except (ExpiredSignatureError, InvalidTokenError):
+        return None
+
+
+def _otp_email_html(name: str, email: str, code: str, tipo: str) -> str:
+    """Generate OTP email HTML."""
+    msg = (
+        "Ingresa este codigo para verificar tu cuenta y completar el registro."
+        if tipo == "registro"
+        else "Ingresa este codigo para restablecer tu contrasena."
+    )
+    return f"""<!DOCTYPE html>
+<html>
+<body style="font-family:Arial,Helvetica,sans-serif;background:#EFEFE8;margin:0;padding:32px 16px;">
+  <div style="max-width:520px;margin:0 auto;border:2px solid #1C1917;box-shadow:4px 4px 0 #1C1917;background:#fff;">
+    <div style="background:#17110D;border-bottom:2px solid #1C1917;padding:10px 20px;">
+      <table width="100%" style="border-collapse:collapse;"><tbody><tr>
+        <td><span style="font-family:'Courier New',Courier,monospace;font-size:9px;letter-spacing:0.15em;color:#A1A1AA;text-transform:uppercase;">SCOUTIA</span></td>
+        <td align="right">
+          <span style="display:inline-block;width:9px;height:9px;background:#E63946;border:2px solid #3A2719;margin-right:4px;"></span>
+          <span style="display:inline-block;width:9px;height:9px;background:rgba(255,255,255,0.12);border:2px solid #3A2719;margin-right:4px;"></span>
+          <span style="display:inline-block;width:9px;height:9px;background:#3FAE2A;border:2px solid #3A2719;"></span>
+        </td>
+      </tr></tbody></table>
+    </div>
+    <div style="padding:28px;">
+      <p style="font-family:'Courier New',Courier,monospace;font-size:9px;letter-spacing:0.12em;color:#71717A;text-transform:uppercase;margin:0 0 10px;">CODIGO DE VERIFICACION</p>
+      <h2 style="font-family:Arial,Helvetica,sans-serif;font-size:18px;color:#1C1917;margin:0 0 20px;">Hola, {name}</h2>
+      <div style="background:#E7E7DE;border:2px solid #1C1917;padding:24px;text-align:center;margin-bottom:20px;">
+        <p style="font-family:'Courier New',Courier,monospace;font-size:36px;letter-spacing:0.4em;color:#1C1917;font-weight:bold;margin:0;padding-right:0.4em;">{code}</p>
+        <p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#71717A;margin:10px 0 0;">Expira en 10 minutos</p>
+      </div>
+      <p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#3F3F46;line-height:1.6;margin:0 0 20px;">{msg}</p>
+      <p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#71717A;line-height:1.6;margin:0 0 20px;">Si no solicitaste este codigo, ignora este mensaje.</p>
+      <hr style="border:none;border-top:2px solid #1C1917;margin:20px 0 16px;">
+      <table width="100%" style="border-collapse:collapse;"><tbody><tr>
+        <td><span style="font-family:'Courier New',Courier,monospace;font-size:8px;color:#71717A;text-transform:uppercase;letter-spacing:0.1em;">Enviado a {email}</span></td>
+        <td align="right"><span style="font-family:'Courier New',Courier,monospace;font-size:8px;color:#71717A;text-transform:uppercase;letter-spacing:0.1em;">SCOUTIA.DEV</span></td>
+      </tr></tbody></table>
+    </div>
+  </div>
+</body>
+</html>"""
+
+
 async def login(email: str, password: str) -> AuthResponse:
     client = _db_required()
 
@@ -130,12 +203,27 @@ async def login(email: str, password: str) -> AuthResponse:
 
 async def register(email: str, password: str, full_name: str | None = None) -> None:
     client = _db_required()
+    from app.services import otp_service, email_service
 
     options: dict = {}
     if full_name:
         options["data"] = {"full_name": full_name}
 
-    await run_sync(lambda: client.auth.sign_up({"email": email, "password": password, "options": options}))
+    response = await run_sync(lambda: client.auth.sign_up({"email": email, "password": password, "options": options}))
+    user_id = str(response.user.id)
+
+    try:
+        code = await otp_service.generate_and_store(email, "register", user_id)
+        name = full_name or "Usuario"
+        html = _otp_email_html(name, email, code, "registro")
+        await email_service.send_transactional_email(
+            to_email=email,
+            to_name=full_name,
+            subject="Tu codigo de verificacion - Scoutia",
+            html_content=html,
+        )
+    except Exception:
+        logger.warning("Could not send registration OTP for %s", email, exc_info=True)
 
 
 async def logout(token: str) -> None:
@@ -179,9 +267,34 @@ async def get_user(token: str) -> AuthUser | None:
         return None
 
 
-async def forgot_password(email: str, redirect_url: str) -> None:
+async def forgot_password(email: str, redirect_url: str | None = None) -> None:
     client = _db_required()
-    await run_sync(lambda: client.auth.reset_password_for_email(email, {"redirect_to": redirect_url}))
+    from app.services import otp_service, email_service
+
+    try:
+        result = await run_sync(lambda: (
+            client.table("profiles")
+            .select("id, full_name")
+            .eq("email", email.lower())
+            .maybe_single()
+            .execute()
+        ))
+        if not result or not result.data:
+            return  # silently succeed — don't reveal email existence
+        profile = result.data
+        user_id = profile["id"]
+        full_name = profile.get("full_name")
+        code = await otp_service.generate_and_store(email, "reset", user_id)
+        name = full_name or "Usuario"
+        html = _otp_email_html(name, email, code, "recuperacion")
+        await email_service.send_transactional_email(
+            to_email=email,
+            to_name=full_name,
+            subject="Codigo para restablecer tu contrasena - Scoutia",
+            html_content=html,
+        )
+    except Exception:
+        logger.warning("Forgot password OTP failed for %s", email, exc_info=True)
 
 
 def _slugify(text: str) -> str:
@@ -343,3 +456,40 @@ async def reset_password(access_token: str, new_password: str) -> None:
         str(user_response.user.id),
         {"password": new_password},
     ))
+
+
+async def verify_registration_otp(email: str, code: str) -> AuthResponse:
+    """Verify registration OTP and return auth response with access token."""
+    from app.services import otp_service
+    client = _db_required()
+
+    user_id = await otp_service.verify(email, "register", code)
+
+    try:
+        await run_sync(lambda: client.auth.admin.update_user_by_id(user_id, {"email_confirm": True}))
+    except Exception:
+        logger.warning("Could not confirm email for user %s", user_id, exc_info=True)
+
+    profile = await _profile_for_user(client, user_id)
+    workspace = await _workspace_for_id(client, profile.get("workspace_id"))
+    user = _user_from_sources(user_id, email, {}, profile, workspace)
+    token = create_access_token(user_id, email)
+    await cache.set(_token_cache_key(token), user.model_dump(), ttl=TTL_AUTH_TOKEN)
+    return AuthResponse(access_token=token, user=_sign(user))
+
+
+async def verify_reset_otp(email: str, code: str) -> str:
+    """Verify reset OTP and return short-lived reset token."""
+    from app.services import otp_service
+    user_id = await otp_service.verify(email, "reset", code)
+    return _create_reset_token(user_id, email)
+
+
+async def reset_password_with_otp_token(reset_token: str, new_password: str) -> None:
+    """Reset password using the OTP-derived reset token."""
+    payload = _verify_reset_token(reset_token)
+    if not payload:
+        raise ValueError("Token invalido o expirado.")
+    user_id = payload["sub"]
+    client = _db_required()
+    await run_sync(lambda: client.auth.admin.update_user_by_id(user_id, {"password": new_password}))

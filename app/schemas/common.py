@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 T = TypeVar("T")
 
-MAX_PAGE_LIMIT = 200
+MAX_PAGE_LIMIT = 1000
 
 
 class PaginationParams(BaseModel):

@@ -1,4 +1,5 @@
 import logging
+from datetime import date as _date
 
 from app.async_utils import run_sync
 from app.exceptions import LeadNotFoundError
@@ -49,6 +50,8 @@ async def create_lead(workspace_id: str, data: LeadCreate) -> dict:
 
 async def update_lead(workspace_id: str, lead_id: str, data: LeadUpdate) -> dict:
     payload = data.model_dump(mode="json", exclude_none=True)
+    if payload.get("status") == "contactado" and "last_contact" not in payload:
+        payload["last_contact"] = _date.today().isoformat()
     updated = await run_sync(leads_repository.update_lead, lead_id, payload, workspace_id=workspace_id)
     if not updated:
         raise LeadNotFoundError(lead_id)

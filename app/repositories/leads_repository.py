@@ -115,7 +115,7 @@ def get_workspace_stats(workspace_id: str) -> dict:
     rows = db.table("leads").select("score,priority,last_contact,status").eq("workspace_id", workspace_id).execute().data or []
     total = len(rows)
     high_priority = sum(1 for r in rows if r.get("priority") == "alta")
-    no_contact = sum(1 for r in rows if not r.get("last_contact"))
+    no_contact = sum(1 for r in rows if r.get("status") == "nuevo")
     avg_score = round(sum(r.get("score", 0) for r in rows) / total) if total > 0 else 0
     by_status: dict[str, int] = {}
     for r in rows:

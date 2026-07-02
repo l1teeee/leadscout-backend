@@ -14,6 +14,7 @@ from app.schemas.settings_schema import (
     AiContextUpdate,
     AuditEntry,
     AuditSettings,
+    PublicSupportContactRequest,
     SupportContactRequest,
     TeamSettings,
     UsageSettings,
@@ -118,6 +119,25 @@ async def send_support_request(user: AuthUser, data: SupportContactRequest) -> N
         )
     except Exception as exc:
         logger.error("Support email error: %s", exc)
+        raise SupportRequestError("No se pudo enviar la consulta.") from exc
+
+
+async def send_public_support_request(data: PublicSupportContactRequest) -> None:
+    try:
+        await email_service.send_support_email(
+            from_email=data.email,
+            from_name=data.name,
+            workspace_name=None,
+            subject=data.subject,
+            message=data.message,
+        )
+        await email_service.send_support_confirmation_email(
+            to_email=data.email,
+            to_name=data.name,
+            subject=data.subject,
+        )
+    except Exception as exc:
+        logger.error("Public support email error: %s", exc)
         raise SupportRequestError("No se pudo enviar la consulta.") from exc
 
 

@@ -98,3 +98,10 @@ class AiContextImportResponse(BaseModel):
 class SupportContactRequest(BaseModel):
     subject: str = Field(..., min_length=3, max_length=150)
     message: str = Field(..., min_length=10, max_length=4000)
+
+
+class PublicSupportContactRequest(BaseModel):
+    name: Optional[str] = Field(None, max_length=200)
+    email: str = Field(..., min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    subject: str = Field(..., min_length=3, max_length=150)
+    message: str = Field(..., min_length=10, max_length=4000)

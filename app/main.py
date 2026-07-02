@@ -19,7 +19,7 @@ from app.exceptions import (
 from app.middleware.origin_guard import OriginGuardMiddleware
 from app.middleware.request_logger import RequestLoggerMiddleware
 from app.rate_limit import limiter
-from app.routes import auth, explorer, health, leads, reports
+from app.routes import auth, explorer, health, leads, reports, support
 from app.routes import settings as settings_router
 
 logging.basicConfig(
@@ -108,3 +108,4 @@ app.include_router(leads.router, prefix="/api")
 app.include_router(explorer.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
+app.include_router(support.router, prefix="/api")

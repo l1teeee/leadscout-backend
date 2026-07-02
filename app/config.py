@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     BREVO_SENDER_EMAIL: str = "notifications@scoutia.dev"
     BREVO_SENDER_NAME: str = "Scoutia"
 
+    SUPPORT_RECIPIENT_EMAIL: str = "official.count.alejandro@gmail.com"
+    SUPPORT_RECIPIENT_NAME: str = "Scoutia Support"
+
     LOG_LEVEL: str = "info"
 
     PROXY_LIST: str = ""

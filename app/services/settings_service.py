@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.async_utils import run_sync
-from app.exceptions import ProfileUpdateError, WorkspaceNotFoundError
+from app.exceptions import ProfileUpdateError, SupportRequestError, WorkspaceNotFoundError
 from app.repositories import (
     ai_usage_repository,
     search_audit_repository,
@@ -14,11 +14,13 @@ from app.schemas.settings_schema import (
     AiContextUpdate,
     AuditEntry,
     AuditSettings,
+    SupportContactRequest,
     TeamSettings,
     UsageSettings,
     UserProfileUpdate,
     WorkspaceUpdate,
 )
+from app.services import email_service
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +100,25 @@ async def update_ai_context(workspace_id: str, data: AiContextUpdate) -> AiConte
         constraints=row.get("ai_constraints") or "",
         updated_at=str(row["ai_context_updated_at"]) if row.get("ai_context_updated_at") else None,
     )
+
+
+async def send_support_request(user: AuthUser, data: SupportContactRequest) -> None:
+    try:
+        await email_service.send_support_email(
+            from_email=user.email,
+            from_name=user.full_name,
+            workspace_name=user.workspace_name,
+            subject=data.subject,
+            message=data.message,
+        )
+        await email_service.send_support_confirmation_email(
+            to_email=user.email,
+            to_name=user.full_name,
+            subject=data.subject,
+        )
+    except Exception as exc:
+        logger.error("Support email error: %s", exc)
+        raise SupportRequestError("No se pudo enviar la consulta.") from exc
 
 
 async def get_audit(workspace_id: str, limit: int = 10) -> AuditSettings:

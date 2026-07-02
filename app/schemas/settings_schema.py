@@ -93,3 +93,8 @@ class AiContextImportRequest(BaseModel):
 class AiContextImportResponse(BaseModel):
     business_context: str
     constraints: str
+
+
+class SupportContactRequest(BaseModel):
+    subject: str = Field(..., min_length=3, max_length=150)
+    message: str = Field(..., min_length=10, max_length=4000)

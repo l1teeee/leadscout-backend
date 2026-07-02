@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.dependencies import CurrentToken, CurrentUser, CurrentWorkspace
-from app.exceptions import ProfileUpdateError, WorkspaceNotFoundError
-from app.schemas.auth_schema import AuthUser
+from app.exceptions import ProfileUpdateError, SupportRequestError, WorkspaceNotFoundError
+from app.rate_limit import limiter
+from app.schemas.auth_schema import AuthUser, MessageResponse
 from app.schemas.settings_schema import (
     AiContextExampleRequest,
     AiContextExampleResponse,
@@ -11,6 +12,7 @@ from app.schemas.settings_schema import (
     AiContextSettings,
     AiContextUpdate,
     AuditSettings,
+    SupportContactRequest,
     TeamSettings,
     UsageSettings,
     UserProfileUpdate,
@@ -98,3 +100,13 @@ async def import_ai_context(body: AiContextImportRequest, _: CurrentWorkspace):
         return result
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+
+
+@router.post("/support", response_model=MessageResponse)
+@limiter.limit("3/minute")
+async def send_support_request(request: Request, body: SupportContactRequest, user: CurrentUser):
+    try:
+        await settings_service.send_support_request(user, body)
+    except SupportRequestError as exc:
+        raise HTTPException(status_code=502, detail=exc.message)
+    return MessageResponse(message="Consulta enviada.")

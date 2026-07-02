@@ -55,8 +55,8 @@ class Settings(BaseSettings):
     BREVO_SENDER_EMAIL: str = "notifications@scoutia.dev"
     BREVO_SENDER_NAME: str = "Scoutia"
 
-    SUPPORT_RECIPIENT_EMAIL: str = "official.count.alejandro@gmail.com"
-    SUPPORT_RECIPIENT_NAME: str = "Scoutia Support"
+    SUPPORT_RECIPIENT_EMAIL: str = "contact@delta-numen.com"
+    SUPPORT_RECIPIENT_NAME: str = "Numen Agency"
 
     LOG_LEVEL: str = "info"
 

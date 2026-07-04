@@ -59,6 +59,7 @@ async def register(request: Request, body: RegisterRequest):
     except ExternalServiceError as exc:
         raise HTTPException(status_code=503, detail=exc.message)
     except Exception as exc:
+        logger.warning("Register failed for %s: %s", body.email, exc)
         raise HTTPException(status_code=400, detail=_friendly(exc))
 
 

@@ -313,8 +313,14 @@ async def complete_onboarding(token: str, data: dict) -> AuthUser:
         raise ValueError("Token invalido o expirado.")
     user_id = payload["sub"]
     email = payload.get("email", "")
-    admin_resp = await run_sync(lambda: client.auth.admin.get_user_by_id(user_id))
-    existing_meta = admin_resp.user.user_metadata or {}
+
+    existing_meta = {}
+    try:
+        admin_resp = await run_sync(lambda: client.auth.admin.get_user_by_id(user_id))
+        existing_meta = admin_resp.user.user_metadata or {}
+    except Exception as exc:
+        logger.warning("Could not read auth metadata for onboarding user %s: %s", user_id, exc)
+
     existing_profile = await _profile_for_user(client, user_id)
 
     workspace_name = data.get("workspace_name") or "Mi Workspace"
@@ -370,7 +376,10 @@ async def complete_onboarding(token: str, data: dict) -> AuthUser:
         "country": data.get("country"),
         "city": data.get("city"),
     }
-    await run_sync(lambda: client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_meta}))
+    try:
+        await run_sync(lambda: client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_meta}))
+    except Exception as exc:
+        logger.warning("Could not update auth metadata for onboarding user %s: %s", user_id, exc)
 
     await cache.delete(_token_cache_key(token))
 

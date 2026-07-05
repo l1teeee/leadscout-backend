@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import MagicMock
 
 from app.security import create_access_token
 from app.services import auth_service
@@ -36,3 +37,26 @@ def test_onboarding_continues_when_auth_admin_metadata_is_forbidden(mock_supabas
     assert user.email == email
     assert user.onboarded is True
     assert user.workspace_id == "test-workspace-123"
+
+
+def test_login_uses_isolated_auth_client_for_password_sign_in(monkeypatch, mock_supabase):
+    auth_client = MagicMock()
+    auth_response = MagicMock()
+    auth_response.user.id = "95cc638f-dfd7-4cbb-870e-d55280eaff3c"
+    auth_response.user.email = "official.count.alejandro@gmail.com"
+    auth_response.user.user_metadata = {}
+    auth_client.auth.sign_in_with_password.return_value = auth_response
+
+    monkeypatch.setattr(
+        "app.services.supabase_service.get_auth_client",
+        lambda: auth_client,
+    )
+
+    user_response = _run(auth_service.login("official.count.alejandro@gmail.com", "Password123"))
+
+    auth_client.auth.sign_in_with_password.assert_called_once_with(
+        {"email": "official.count.alejandro@gmail.com", "password": "Password123"}
+    )
+    assert not auth_client.table.called
+    assert mock_supabase.table.called
+    assert user_response.user.id == "95cc638f-dfd7-4cbb-870e-d55280eaff3c"

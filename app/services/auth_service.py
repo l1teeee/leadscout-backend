@@ -23,6 +23,18 @@ def _db_required():
     return client
 
 
+def _auth_db():
+    from app.services import supabase_service
+    return supabase_service.get_auth_client()
+
+
+def _auth_db_required():
+    client = _auth_db()
+    if not client:
+        raise ExternalServiceError("Supabase", "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.")
+    return client
+
+
 def _token_cache_key(token: str) -> str:
     import hashlib
     return f"auth:user:{hashlib.sha256(token.encode()).hexdigest()[:32]}"
@@ -118,6 +130,7 @@ def _sign(user: AuthUser) -> AuthUser:
 def _create_reset_token(user_id: str, email: str) -> str:
     """Short-lived 15-minute token specifically for password reset after OTP verification."""
     import jwt as _jwt
+
     from app.config import settings
     secret = settings.SIGNING_SECRET.get_secret_value() or "dev-only-insecure-secret-change-in-prod"
     now = datetime.now(UTC)
@@ -135,6 +148,7 @@ def _verify_reset_token(token: str) -> dict | None:
     """Verify reset token and return payload, or None if invalid/expired."""
     import jwt as _jwt
     from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
+
     from app.config import settings
     secret = settings.SIGNING_SECRET.get_secret_value() or "dev-only-insecure-secret-change-in-prod"
     try:
@@ -188,9 +202,10 @@ def _otp_email_html(name: str, email: str, code: str, tipo: str) -> str:
 
 
 async def login(email: str, password: str) -> AuthResponse:
+    auth_client = _auth_db_required()
     client = _db_required()
 
-    response = await run_sync(lambda: client.auth.sign_in_with_password({"email": email, "password": password}))
+    response = await run_sync(lambda: auth_client.auth.sign_in_with_password({"email": email, "password": password}))
     meta = response.user.user_metadata or {}
     user_id = str(response.user.id)
     profile = await _profile_for_user(client, user_id)
@@ -202,8 +217,8 @@ async def login(email: str, password: str) -> AuthResponse:
 
 
 async def register(email: str, password: str, full_name: str | None = None) -> None:
-    client = _db_required()
-    from app.services import otp_service, email_service
+    client = _auth_db_required()
+    from app.services import email_service, otp_service
 
     options: dict = {}
     if full_name:
@@ -269,7 +284,7 @@ async def get_user(token: str) -> AuthUser | None:
 
 async def forgot_password(email: str, redirect_url: str | None = None) -> None:
     client = _db_required()
-    from app.services import otp_service, email_service
+    from app.services import email_service, otp_service
 
     try:
         result = await run_sync(lambda: (
@@ -459,8 +474,9 @@ async def update_profile(token: str, data: dict) -> AuthUser:
 async def reset_password(access_token: str, new_password: str) -> None:
     await cache.delete(_token_cache_key(access_token))
     client = _db_required()
+    auth_client = _auth_db_required()
 
-    user_response = await run_sync(lambda: client.auth.get_user(access_token))
+    user_response = await run_sync(lambda: auth_client.auth.get_user(access_token))
     await run_sync(lambda: client.auth.admin.update_user_by_id(
         str(user_response.user.id),
         {"password": new_password},

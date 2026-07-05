@@ -291,12 +291,13 @@ async def forgot_password(email: str, redirect_url: str | None = None) -> None:
             client.table("profiles")
             .select("id, full_name")
             .eq("email", email.lower())
-            .maybe_single()
+            .order("created_at", desc=True)
+            .limit(1)
             .execute()
         ))
         if not result or not result.data:
             return  # silently succeed — don't reveal email existence
-        profile = result.data
+        profile = result.data[0]
         user_id = profile["id"]
         full_name = profile.get("full_name")
         code = await otp_service.generate_and_store(email, "reset", user_id)

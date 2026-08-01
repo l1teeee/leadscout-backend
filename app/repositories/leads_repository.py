@@ -117,7 +117,15 @@ def find_by_place_id(google_place_id: str, workspace_id: str) -> dict | None:
 
 def get_workspace_stats(workspace_id: str) -> dict:
     db = _db_required()
-    rows = db.table("leads").select("score,priority,last_contact,status").eq("workspace_id", workspace_id).execute().data or []
+    rows = (
+        db.table("leads")
+        .select("score,priority,last_contact,status")
+        .eq("workspace_id", workspace_id)
+        .eq("hidden", False)
+        .execute()
+        .data
+        or []
+    )
     total = len(rows)
     high_priority = sum(1 for r in rows if r.get("priority") == "alta")
     no_contact = sum(1 for r in rows if r.get("status") == "nuevo")

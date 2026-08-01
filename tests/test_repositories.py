@@ -34,7 +34,7 @@ def test_list_all_selects_only_needed_columns():
 
 def test_get_workspace_stats_returns_correct_keys():
     mock_db = MagicMock()
-    mock_db.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[
+    mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[
         {"score": 80, "priority": "alta", "last_contact": None, "status": "nuevo"},
         {"score": 40, "priority": "media", "last_contact": "2025-01-01", "status": "contactado"},
     ])

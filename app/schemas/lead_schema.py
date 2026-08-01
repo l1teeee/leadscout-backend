@@ -41,6 +41,7 @@ class LeadUpdate(BaseModel):
     website: Optional[str] = Field(None, max_length=500)
     last_contact: Optional[date] = None
     is_viewed: Optional[bool] = None
+    hidden: Optional[bool] = None
     ai_analysis: Optional[str] = None
     social_profiles: Optional[list[dict]] = None
 
@@ -66,6 +67,8 @@ class LeadResponse(BaseModel):
     ai_analysis: Optional[str] = None
     social_profiles: Optional[list[dict]] = None
     is_viewed: bool = False
+    hidden: bool = False
+    hidden_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -83,6 +86,7 @@ class LeadFilters(BaseModel):
     sort_by: Optional[str] = Field("created_at", max_length=50)
     sort_order: Optional[str] = Field("desc", pattern="^(asc|desc)$")
     is_viewed: Optional[bool] = None
+    is_hidden: Optional[bool] = None
 
     @property
     def safe_sort_by(self) -> str:

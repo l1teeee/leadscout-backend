@@ -2,6 +2,7 @@ import asyncio
 import logging
 import math
 import time
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 
 from app.exceptions import ExternalServiceError
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 # Max concurrent place-detail fetches + DB writes. Keeps DNS/connection load low.
 _PLACE_SEM = asyncio.Semaphore(10)
+
+HIDDEN_COOLDOWN_DAYS = 45
 
 _GENERIC_QUERY_GROUPS = [
     [
@@ -270,6 +273,15 @@ async def _process_place(
             existing = None
             if place_id:
                 existing = await loop.run_in_executor(None, lambda: leads_repository.find_by_place_id(place_id, workspace_id))
+
+            if existing and existing.get("hidden"):
+                hidden_at = existing.get("hidden_at")
+                if hidden_at:
+                    parsed_hidden_at = datetime.fromisoformat(hidden_at)
+                    if datetime.now(UTC) - parsed_hidden_at < timedelta(days=HIDDEN_COOLDOWN_DAYS):
+                        return None, 0
+                else:
+                    return None, 0
 
             has_website = bool(place_data.get("website")) and not _is_social_url(place_data.get("website") or "")
             has_phone = bool(place_data.get("formatted_phone_number"))

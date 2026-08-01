@@ -22,6 +22,7 @@ def list_leads(
     min_score: int | None = None,
     max_score: int | None = None,
     is_viewed: bool | None = None,
+    is_hidden: bool | None = None,
     sort_by: str = "created_at",
     sort_order: str = "desc",
     limit: int = 100,
@@ -45,6 +46,10 @@ def list_leads(
         query = query.lte("score", max_score)
     if is_viewed is not None:
         query = query.eq("is_viewed", is_viewed)
+    if is_hidden:
+        query = query.eq("hidden", True)
+    else:
+        query = query.eq("hidden", False)
     query = query.order(sort_by, desc=(sort_order == "desc"))
     result = query.range(offset, offset + limit - 1).execute()
     data = result.data
@@ -102,7 +107,7 @@ def find_by_place_id(google_place_id: str, workspace_id: str) -> dict | None:
     db = _db_required()
     result = (
         db.table("leads")
-        .select("id")
+        .select("id, hidden, hidden_at")
         .eq("google_place_id", google_place_id)
         .eq("workspace_id", workspace_id)
         .execute()

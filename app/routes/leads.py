@@ -26,13 +26,14 @@ async def list_leads(
     sort_by: Optional[str] = Query("created_at", max_length=50),
     sort_order: Optional[str] = Query("desc", pattern="^(asc|desc)$"),
     is_viewed: Optional[bool] = Query(None),
+    is_hidden: Optional[bool] = Query(None),
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
     offset: int = Query(0, ge=0),
 ):
     filters = LeadFilters(
         q=q, status=status, priority=priority,
         category=category, min_score=min_score, max_score=max_score,
-        sort_by=sort_by, sort_order=sort_order, is_viewed=is_viewed,
+        sort_by=sort_by, sort_order=sort_order, is_viewed=is_viewed, is_hidden=is_hidden,
     )
     pagination = PaginationParams(limit=limit, offset=offset)
     return await leads_service.list_leads(workspace_id, filters, pagination)

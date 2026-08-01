@@ -12,14 +12,16 @@ from app.exceptions import (
     DuplicateLeadError,
     ExternalServiceError,
     LeadNotFoundError,
+    WorkspaceAccessDeniedError,
     duplicate_lead_handler,
     external_service_handler,
     lead_not_found_handler,
+    workspace_access_denied_handler,
 )
 from app.middleware.origin_guard import OriginGuardMiddleware
 from app.middleware.request_logger import RequestLoggerMiddleware
 from app.rate_limit import limiter
-from app.routes import auth, explorer, health, leads, reports, support
+from app.routes import auth, explorer, health, leads, reports, support, workspaces
 from app.routes import settings as settings_router
 
 logging.basicConfig(
@@ -100,6 +102,7 @@ app.add_middleware(RequestLoggerMiddleware)
 app.add_exception_handler(LeadNotFoundError, lead_not_found_handler)  # type: ignore[arg-type]
 app.add_exception_handler(DuplicateLeadError, duplicate_lead_handler)  # type: ignore[arg-type]
 app.add_exception_handler(ExternalServiceError, external_service_handler)  # type: ignore[arg-type]
+app.add_exception_handler(WorkspaceAccessDeniedError, workspace_access_denied_handler)  # type: ignore[arg-type]
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(health.router)
@@ -109,3 +112,4 @@ app.include_router(explorer.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(support.router, prefix="/api")
+app.include_router(workspaces.router, prefix="/api")

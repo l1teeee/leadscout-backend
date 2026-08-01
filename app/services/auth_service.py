@@ -381,6 +381,12 @@ async def complete_onboarding(token: str, data: dict) -> AuthUser:
     }
     await run_sync(lambda: client.table("profiles").upsert(profile_payload, on_conflict="id").execute())
 
+    from app.repositories import workspace_members_repository
+    try:
+        await run_sync(workspace_members_repository.add_member, workspace_id, user_id, "owner")
+    except Exception:
+        pass
+
     updated_meta = {
         **existing_meta,
         "onboarded": True,

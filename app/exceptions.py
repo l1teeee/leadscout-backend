@@ -37,6 +37,11 @@ class SupportRequestError(Exception):
         self.message = message
 
 
+class WorkspaceAccessDeniedError(Exception):
+    def __init__(self, workspace_id: str) -> None:
+        self.workspace_id = workspace_id
+
+
 async def lead_not_found_handler(request: Request, exc: LeadNotFoundError) -> JSONResponse:
     return JSONResponse(status_code=404, content={"detail": f"Lead {exc.lead_id} not found"})
 
@@ -51,3 +56,7 @@ async def external_service_handler(request: Request, exc: ExternalServiceError) 
         status_code=502,
         content={"detail": f"{exc.service}: {exc.message}"},
     )
+
+
+async def workspace_access_denied_handler(request: Request, exc: WorkspaceAccessDeniedError) -> JSONResponse:
+    return JSONResponse(status_code=403, content={"detail": f"No tienes acceso al workspace {exc.workspace_id}."})
